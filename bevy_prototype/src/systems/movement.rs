@@ -17,15 +17,18 @@ pub fn asteroid_movement_system(
             vel_comp.0 = *new_vel;
         }
 
-        transform.translation += vel_comp.0.extend(0.0) * time.delta_seconds();
+        transform.translation += vel_comp.0 * time.delta_seconds();
 
-        if transform.translation.y < -800.0 || transform.translation.x.abs() > 1200.0 {
+        if transform.translation.y < -800.0
+            || transform.translation.x.abs() > 1200.0
+            || transform.translation.z.abs() > 1200.0
+        {
             commands.entity(entity).despawn_recursive();
             continue;
         }
 
         if let Some(sh_pos) = shuttle_opt {
-            let dist = (transform.translation.truncate() - sh_pos).length();
+            let dist = (transform.translation - sh_pos).length();
             let shuttle_radius = 15.0;
             let rad = 16.0;
             if dist < shuttle_radius + rad {

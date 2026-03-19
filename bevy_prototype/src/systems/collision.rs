@@ -9,8 +9,8 @@ pub fn asteroid_collision_system(
 ) {
     struct AstState {
         entity: Entity,
-        pos: Vec2,
-        vel: Vec2,
+        pos: Vec3,
+        vel: Vec3,
         radius: f32,
         mass: f32,
     }
@@ -19,7 +19,7 @@ pub fn asteroid_collision_system(
     for (entity, vel, radius, transform) in asteroids.iter() {
         states.push(AstState {
             entity,
-            pos: transform.translation.truncate(),
+            pos: transform.translation,
             vel: vel.0,
             radius: radius.0,
             mass: radius.0 * radius.0,
@@ -31,7 +31,7 @@ pub fn asteroid_collision_system(
         updates.0.insert(s.entity, s.vel);
     }
 
-    let e = 1.0;
+    let e = 1.0; // restitution
     for i in 0..states.len() {
         for j in (i + 1)..states.len() {
             let a = &states[i];
@@ -46,7 +46,7 @@ pub fn asteroid_collision_system(
             let v1 = *updates.0.get(&a.entity).unwrap_or(&a.vel);
             let v2 = *updates.0.get(&b.entity).unwrap_or(&b.vel);
             let rv = v1 - v2;
-            let n = if dist > 0.0 { delta / dist } else { Vec2::X };
+            let n = if dist > 0.0 { delta / dist } else { Vec3::X };
             let vel_along_normal = rv.dot(n);
             if vel_along_normal >= 0.0 {
                 continue;
