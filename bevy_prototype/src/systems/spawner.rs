@@ -1,8 +1,48 @@
 use bevy::prelude::*;
+use bevy::render::mesh::VertexAttributeValues;
 use rand::Rng;
 
 use crate::components::*;
 use crate::resources::{AsteroidSpawnTimer, TimePaused};
+
+fn build_asteroid_mesh(radius: f32, rng: &mut impl Rng) -> Mesh {
+    let mut mesh = Mesh::from(shape::UVSphere {
+        radius: 1.0,
+        sectors: 18,
+        stacks: 12,
+    });
+
+    let stretch_x = rng.gen_range(0.5..1.6);
+    let stretch_y = rng.gen_range(0.5..1.6);
+    let stretch_z = rng.gen_range(0.5..1.6);
+    let noise_a = rng.gen_range(0.9..2.4);
+    let noise_b = rng.gen_range(0.9..2.4);
+    let noise_c = rng.gen_range(0.9..2.4);
+    let noise_phase = rng.gen_range(0.0..std::f32::consts::TAU);
+
+    if let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) {
+        for position in positions.iter_mut() {
+            let mut point = Vec3::new(position[0], position[1], position[2]);
+            let direction = point.normalize_or_zero();
+            let surface_noise = (direction.x * noise_a + noise_phase).sin() * 0.36
+                + (direction.y * noise_b - noise_phase * 0.6).cos() * 0.28
+                + (direction.z * noise_c + noise_phase * 1.3).sin() * 0.22;
+            let crater = if direction.y > 0.25 { -0.22 * rng.gen_range(0.6..1.0) } else { 0.0 };
+            let irregularity = (1.0 + surface_noise + crater + rng.gen_range(-0.12..0.12)).clamp(0.55, 1.55);
+
+            point.x *= stretch_x * irregularity;
+            point.y *= stretch_y * irregularity;
+            point.z *= stretch_z * irregularity;
+            point *= radius;
+
+            *position = [point.x, point.y, point.z];
+        }
+    }
+
+    mesh.duplicate_vertices();
+    mesh.compute_flat_normals();
+    mesh
+}
 
 pub fn asteroid_spawner_system(
     time: Res<Time>,
@@ -29,19 +69,28 @@ pub fn spawn_asteroid(
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
 ) {
-    let x = rng.gen_range(-1200.0..1200.0);
-    let z = rng.gen_range(-1200.0..1200.0);
-    let y = rng.gen_range(200.0..1600.0);
-    let radius = rng.gen_range(8.0..40.0);
-    let vx = rng.gen_range(-30.0..30.0);
-    let vz = rng.gen_range(-30.0..30.0);
-    let vy = rng.gen_range(-80.0..-30.0);
+    let x = rng.gen_range(-3200.0..3200.0);
+    let z = rng.gen_range(-3200.0..3200.0);
+    let y = rng.gen_range(900.0..4200.0);
+    let radius = rng.gen_range(28.0..140.0);
+    let vx = rng.gen_range(-20.0..20.0);
+    let vz = rng.gen_range(-20.0..20.0);
+    let vy = rng.gen_range(-60.0..-20.0);
+
+    let ang_vel = Vec3::new(
+        rng.gen_range(-0.35..0.35),
+        rng.gen_range(-0.35..0.35),
+        rng.gen_range(-0.35..0.35),
+    );
 
     commands.spawn((
         PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::UVSphere { radius, sectors: 16, stacks: 16 })),
+            mesh: meshes.add(build_asteroid_mesh(radius, rng)),
             material: materials.add(StandardMaterial {
-                base_color: Color::rgb(0.5, 0.45, 0.4),
+                base_color: Color::rgb(0.28, 0.26, 0.24),
+                perceptual_roughness: 1.0,
+                metallic: 0.0,
+                reflectance: 0.04,
                 ..default()
             }),
             transform: Transform::from_translation(Vec3::new(x, y, z)),
@@ -50,5 +99,6 @@ pub fn spawn_asteroid(
         Asteroid,
         Velocity(Vec3::new(vx, vy, vz)),
         Radius(radius),
+        AngularVelocity(ang_vel),
     ));
 }

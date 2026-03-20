@@ -5,6 +5,7 @@ mod systems;
 
 use bevy::prelude::*;
 use resources::*;
+use systems::movement::record_camera_position_system;
 use systems::mouse::mouse_look_system;
 use systems::exit::toggle_menu_system;
 use systems::fullscreen::toggle_fullscreen_system;
@@ -28,6 +29,7 @@ fn main() {
         .insert_resource(Keybindings::default())
         .insert_resource(RebindState::default())
         .insert_resource(Throttle(0.0))
+        .insert_resource(PrevCameraPosition::default())
         .insert_resource(VelocityUpdates::default())
         .add_systems(
             Update,
@@ -36,6 +38,7 @@ fn main() {
                 toggle_menu_system,
                 toggle_fullscreen_system,
                 player_movement_system.after(mouse_look_system),
+                record_camera_position_system.after(player_movement_system),
                 ui_update_system.after(player_movement_system),
                 cursor_follow_system.after(ui_update_system),
                 menu_ui_system.after(toggle_menu_system),

@@ -24,6 +24,9 @@ pub struct CompassNeedle;
 pub struct CompassPitchText;
 
 #[derive(Component)]
+pub struct AngularVelocity(pub Vec3);
+
+#[derive(Component)]
 pub struct CursorCross;
 
 // Menu/UI markers
