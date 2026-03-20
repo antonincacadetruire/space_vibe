@@ -21,6 +21,9 @@ pub struct CompassDial;
 pub struct CompassNeedle;
 
 #[derive(Component)]
+pub struct CompassPitchText;
+
+#[derive(Component)]
 pub struct CursorCross;
 
 // Menu/UI markers

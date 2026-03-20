@@ -22,7 +22,7 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, setup::setup)
         .insert_resource(AsteroidSpawnTimer(Timer::from_seconds(1.0, TimerMode::Repeating)))
-        .insert_resource(MouseLook { yaw: 0.0, pitch: 0.0, sensitivity: 0.0025 })
+        .insert_resource(MouseLook { yaw: 0.0, pitch: 0.0, sensitivity: 1.0 })
         .insert_resource(TimePaused(false))
         .insert_resource(MenuState::default())
         .insert_resource(Keybindings::default())

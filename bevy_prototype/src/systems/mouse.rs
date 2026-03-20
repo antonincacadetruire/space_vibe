@@ -6,6 +6,8 @@ use crate::resources::{MouseLook, MenuState};
 
 use std::f32::consts::PI;
 
+const BASE_MOUSE_SENSITIVITY: f32 = 0.0025;
+
 pub fn mouse_look_system(
     mut motion_evr: EventReader<MouseMotion>,
     mut mouse_look: ResMut<MouseLook>,
@@ -17,7 +19,7 @@ pub fn mouse_look_system(
         return;
     }
 
-    let sensitivity = mouse_look.sensitivity;
+    let sensitivity = mouse_look.sensitivity * BASE_MOUSE_SENSITIVITY;
     for ev in motion_evr.iter() {
         // invert horizontal sign so moving mouse right rotates view to the right
         mouse_look.yaw -= ev.delta.x * sensitivity;

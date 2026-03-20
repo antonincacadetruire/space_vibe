@@ -69,10 +69,10 @@ pub fn setup(
     // Use the same font fallback logic as the menu so text renders consistently.
     let font = asset_server.load(resolve_ui_font_path());
 
-    // Procedurally generate a simple green dial and a red needle for compass UI
+    // Procedurally generate a neon compass dial and needle for the futuristic HUD
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
-    let dial_size: u32 = 128;
+    let dial_size: u32 = 176;
     let mut dial_data = vec![0u8; (dial_size * dial_size * 4) as usize];
     let cx = (dial_size / 2) as i32;
     let cy = (dial_size / 2) as i32;
@@ -82,12 +82,22 @@ pub fn setup(
             let dx = x - cx;
             let dy = y - cy;
             let dist2 = dx * dx + dy * dy;
+            let dist = (dist2 as f32).sqrt();
             let idx = ((y * dial_size as i32 + x) * 4) as usize;
             if dist2 <= radius * radius {
-                // green dial background
-                dial_data[idx] = 30; // r
-                dial_data[idx + 1] = 180; // g
-                dial_data[idx + 2] = 30; // b
+                if dist > radius as f32 * 0.90 {
+                    dial_data[idx] = 40;
+                    dial_data[idx + 1] = 255;
+                    dial_data[idx + 2] = 120;
+                } else if dist > radius as f32 * 0.68 {
+                    dial_data[idx] = 12;
+                    dial_data[idx + 1] = 40;
+                    dial_data[idx + 2] = 18;
+                } else {
+                    dial_data[idx] = 6;
+                    dial_data[idx + 1] = 18;
+                    dial_data[idx + 2] = 14;
+                }
                 dial_data[idx + 3] = 255; // a
             } else {
                 // transparent
@@ -110,11 +120,35 @@ pub fn setup(
                 let y = sy + dy;
                 if x>=0 && x < dial_size as i32 && y>=0 && y<dial_size as i32 {
                     let idx = ((y * dial_size as i32 + x) * 4) as usize;
-                    dial_data[idx] = 255;
+                    dial_data[idx] = 90;
                     dial_data[idx+1] = 255;
-                    dial_data[idx+2] = 255;
+                    dial_data[idx+2] = 170;
                     dial_data[idx+3] = 255;
                 }
+            }
+        }
+    }
+
+    // crosshair and center glow
+    for offset in -1..=1 {
+        for x in (cx - 10)..=(cx + 10) {
+            let y = cy + offset;
+            if x>=0 && x < dial_size as i32 && y>=0 && y<dial_size as i32 {
+                let idx = ((y * dial_size as i32 + x) * 4) as usize;
+                dial_data[idx] = 60;
+                dial_data[idx+1] = 255;
+                dial_data[idx+2] = 170;
+                dial_data[idx+3] = 180;
+            }
+        }
+        for y in (cy - 10)..=(cy + 10) {
+            let x = cx + offset;
+            if x>=0 && x < dial_size as i32 && y>=0 && y<dial_size as i32 {
+                let idx = ((y * dial_size as i32 + x) * 4) as usize;
+                dial_data[idx] = 60;
+                dial_data[idx+1] = 255;
+                dial_data[idx+2] = 170;
+                dial_data[idx+3] = 180;
             }
         }
     }
@@ -131,9 +165,9 @@ pub fn setup(
     );
     let dial_handle = images.add(dial_image);
 
-    // needle: tall thin red triangle
-    let n_w: u32 = 16;
-    let n_h: u32 = 96;
+    // needle: tall neon triangle
+    let n_w: u32 = 18;
+    let n_h: u32 = 120;
     let mut needle_data = vec![0u8; (n_w * n_h * 4) as usize];
     let mid = (n_w / 2) as i32;
     for y in 0..(n_h as i32) {
@@ -143,10 +177,10 @@ pub fn setup(
         for x in 0..(n_w as i32) {
             let idx = ((y * n_w as i32 + x) * 4) as usize;
             if (x - mid).abs() <= half {
-                // red
-                needle_data[idx] = 200;
-                needle_data[idx + 1] = 30;
-                needle_data[idx + 2] = 30;
+                // cyan/green neon
+                needle_data[idx] = 70;
+                needle_data[idx + 1] = 255;
+                needle_data[idx + 2] = 210;
                 needle_data[idx + 3] = 255;
             } else {
                 needle_data[idx] = 0;
@@ -172,8 +206,8 @@ pub fn setup(
     commands.spawn(ImageBundle {
         style: Style {
             position_type: PositionType::Absolute,
-            left: Val::Px(8.0),
-            bottom: Val::Px(80.0),
+            left: Val::Px(12.0),
+            bottom: Val::Px(72.0),
             width: Val::Px(dial_size as f32),
             height: Val::Px(dial_size as f32),
             ..default()
@@ -187,8 +221,8 @@ pub fn setup(
     commands.spawn(ImageBundle {
         style: Style {
             position_type: PositionType::Absolute,
-            left: Val::Px(8.0 + (dial_size as f32 - n_w as f32) / 2.0),
-            bottom: Val::Px(80.0 + (dial_size as f32 - n_h as f32) / 2.0),
+            left: Val::Px(12.0 + (dial_size as f32 - n_w as f32) / 2.0),
+            bottom: Val::Px(72.0 + (dial_size as f32 - n_h as f32) / 2.0),
             width: Val::Px(n_w as f32),
             height: Val::Px(n_h as f32),
             ..default()
@@ -250,8 +284,8 @@ pub fn setup(
     .insert(crate::components::CursorCross);
 
     // North (above dial) and South (below dial) indicators
-    let dial_left = 8.0_f32;
-    let dial_bottom = 80.0_f32;
+    let dial_left = 12.0_f32;
+    let dial_bottom = 72.0_f32;
     let dial_size_f = dial_size as f32;
     // approximate center x for single-character labels
     let center_x = dial_left + (dial_size_f / 2.0) - 8.0;
@@ -269,7 +303,26 @@ pub fn setup(
             TextStyle {
                 font: font.clone(),
                 font_size: 18.0,
-                color: Color::WHITE,
+                color: Color::rgb(0.55, 1.0, 0.8),
+            },
+        ),
+        ..default()
+    });
+
+    // East label right of the dial
+    commands.spawn(TextBundle {
+        style: Style {
+            position_type: PositionType::Absolute,
+            left: Val::Px(dial_left + dial_size_f + 4.0),
+            bottom: Val::Px(dial_bottom + (dial_size_f / 2.0) - 10.0),
+            ..default()
+        },
+        text: Text::from_section(
+            "E",
+            TextStyle {
+                font: font.clone(),
+                font_size: 18.0,
+                color: Color::rgb(0.55, 1.0, 0.8),
             },
         ),
         ..default()
@@ -288,11 +341,50 @@ pub fn setup(
             TextStyle {
                 font: font.clone(),
                 font_size: 18.0,
-                color: Color::WHITE,
+                color: Color::rgb(0.55, 1.0, 0.8),
             },
         ),
         ..default()
     });
+
+    // West label left of the dial
+    commands.spawn(TextBundle {
+        style: Style {
+            position_type: PositionType::Absolute,
+            left: Val::Px(dial_left - 20.0),
+            bottom: Val::Px(dial_bottom + (dial_size_f / 2.0) - 10.0),
+            ..default()
+        },
+        text: Text::from_section(
+            "W",
+            TextStyle {
+                font: font.clone(),
+                font_size: 18.0,
+                color: Color::rgb(0.55, 1.0, 0.8),
+            },
+        ),
+        ..default()
+    });
+
+    // vertical angle readout in the center of the compass
+    commands.spawn(TextBundle {
+        style: Style {
+            position_type: PositionType::Absolute,
+            left: Val::Px(dial_left + 34.0),
+            bottom: Val::Px(dial_bottom + (dial_size_f / 2.0) - 18.0),
+            ..default()
+        },
+        text: Text::from_section(
+            "PITCH +0.0°",
+            TextStyle {
+                font: font.clone(),
+                font_size: 20.0,
+                color: Color::rgb(0.20, 1.0, 0.35),
+            },
+        ),
+        ..default()
+    })
+    .insert(crate::components::CompassPitchText);
 
     commands.spawn(TextBundle {
         style: Style {
@@ -313,5 +405,4 @@ pub fn setup(
     })
     .insert(crate::components::SpeedUi);
 
-    // previously there was a CompassUi text here; removed per UI simplification
 }

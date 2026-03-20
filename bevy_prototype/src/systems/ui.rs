@@ -1,13 +1,15 @@
 use bevy::prelude::*;
 
-use crate::components::{MainCamera, SpeedUi};
+use crate::components::{MainCamera, SpeedUi, CompassPitchText};
 use crate::components::CursorCross;
-use crate::resources::Throttle;
+use crate::resources::{Throttle, MouseLook};
 use bevy::window::PrimaryWindow;
 
 pub fn ui_update_system(
     throttle: Res<Throttle>,
-    mut speed_text_q: Query<&mut Text, With<SpeedUi>>,
+    mouse_look: Res<MouseLook>,
+    mut speed_text_q: Query<&mut Text, (With<SpeedUi>, Without<CompassPitchText>)>,
+    mut pitch_text_q: Query<&mut Text, (With<CompassPitchText>, Without<SpeedUi>)>,
     camera_q: Query<&Transform, With<MainCamera>>,
     mut needle_q: Query<&mut Transform, (With<crate::components::CompassNeedle>, Without<MainCamera>)>,
 ) {
@@ -19,14 +21,20 @@ pub fn ui_update_system(
 
     // rotate needle image to match heading
     if let Ok(mut ntrans) = needle_q.get_single_mut() {
-        // needle should point to heading; convert deg to radians and rotate about Z
-        let Ok(transform) = camera_q.get_single() else { return };
-        let forward = transform.rotation.mul_vec3(Vec3::NEG_Z).normalize_or_zero();
-        let ang = forward.z.atan2(forward.x).to_degrees();
-        let mut deg = (90.0 - ang) % 360.0;
-        if deg < 0.0 { deg += 360.0 }
-        let rad = deg.to_radians();
-        ntrans.rotation = Quat::from_rotation_z(-rad);
+        if let Ok(transform) = camera_q.get_single() {
+            // needle should point to heading; convert deg to radians and rotate about Z
+            let forward = transform.rotation.mul_vec3(Vec3::NEG_Z).normalize_or_zero();
+            let ang = forward.z.atan2(forward.x).to_degrees();
+            let mut deg = (90.0 - ang) % 360.0;
+            if deg < 0.0 { deg += 360.0 }
+            let rad = deg.to_radians();
+            ntrans.rotation = Quat::from_rotation_z(-rad);
+        }
+    }
+
+    if let Ok(mut text) = pitch_text_q.get_single_mut() {
+        let pitch_deg = mouse_look.pitch.to_degrees();
+        text.sections[0].value = format!("PITCH {:+.1}°", pitch_deg);
     }
 }
 

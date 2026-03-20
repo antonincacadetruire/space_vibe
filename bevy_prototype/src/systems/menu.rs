@@ -1,9 +1,11 @@
 use bevy::prelude::*;
 use bevy::input::keyboard::KeyboardInput;
+use bevy::window::{PrimaryWindow, Window};
 
 use crate::components::*;
 use crate::resources::{MenuState, Keybindings, RebindState, Action, MouseLook};
 use crate::setup::resolve_ui_font_path;
+use crate::systems::exit::apply_game_cursor;
 
 fn green_text_color() -> Color {
     Color::rgb(0.20, 1.0, 0.35)
@@ -229,6 +231,7 @@ pub fn menu_button_system(
     mut menu: ResMut<MenuState>,
     mut paused: ResMut<crate::resources::TimePaused>,
     mut rebind: ResMut<RebindState>,
+    mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
     for (interaction, resume, settings, commands_btn, quit, settings_back) in interaction_q.iter_mut() {
         if *interaction == Interaction::Pressed {
@@ -237,6 +240,9 @@ pub fn menu_button_system(
                 paused.0 = menu.prev_paused;
                 menu.open = false;
                 menu.settings_open = false;
+                if let Ok(mut window) = windows.get_single_mut() {
+                    apply_game_cursor(&mut window);
+                }
             } else if settings.is_some() {
                 menu.settings_open = true;
             } else if quit.is_some() {
@@ -258,10 +264,10 @@ pub fn sensitivity_button_system(
     for (interaction, inc, dec) in interaction_q.iter_mut() {
         if *interaction == Interaction::Pressed {
             if inc.is_some() {
-                mouse.sensitivity = (mouse.sensitivity + 0.0005).min(0.05);
+                mouse.sensitivity = (mouse.sensitivity + 0.1).min(5.0);
             }
             if dec.is_some() {
-                mouse.sensitivity = (mouse.sensitivity - 0.0005).max(0.0001);
+                mouse.sensitivity = (mouse.sensitivity - 0.1).max(0.1);
             }
         }
     }
@@ -269,7 +275,7 @@ pub fn sensitivity_button_system(
 
 pub fn sensitivity_text_system(mut text_q: Query<&mut Text, With<SensitivityText>>, mouse: Res<MouseLook>) {
     if let Ok(mut text) = text_q.get_single_mut() {
-        text.sections[0].value = format!("{:.4}", mouse.sensitivity);
+        text.sections[0].value = format!("{:.1}", mouse.sensitivity);
     }
 }
 

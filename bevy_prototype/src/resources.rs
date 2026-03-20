@@ -8,7 +8,7 @@ pub struct AsteroidSpawnTimer(pub Timer);
 pub struct MouseLook {
 	pub yaw: f32,
 	pub pitch: f32,
-    pub sensitivity: f32,
+	pub sensitivity: f32,
 }
 
 #[derive(Resource, Default)]
