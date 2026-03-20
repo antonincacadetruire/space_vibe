@@ -22,3 +22,6 @@ pub struct CompassDial;
 
 #[derive(Component)]
 pub struct CompassNeedle;
+
+#[derive(Component)]
+pub struct CursorCross;

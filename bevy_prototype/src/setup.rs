@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::window::{PrimaryWindow, Window, CursorIcon, CursorGrabMode};
 use rand::Rng;
 
 use crate::components::*;
@@ -9,6 +10,7 @@ pub fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
+    mut windows: Query<&mut Window, With<PrimaryWindow>>,
     asset_server: Res<AssetServer>,
 ) {
     commands.spawn((
@@ -18,6 +20,15 @@ pub fn setup(
         },
         crate::components::MainCamera,
     ));
+
+    // Hide the OS cursor so only our UI crosshair indicates direction
+    if let Ok(mut window) = windows.get_single_mut() {
+        window.cursor.visible = false;
+        window.cursor.icon = CursorIcon::Crosshair;
+        window.cursor.grab_mode = CursorGrabMode::Locked;
+    }
+
+    // (OS cursor hidden) — we draw an on-screen UI cross to indicate pointer
 
     commands.spawn(DirectionalLightBundle {
         directional_light: DirectionalLight {
@@ -190,6 +201,56 @@ pub fn setup(
         ..default()
     })
     .insert(crate::components::CompassNeedle);
+
+    // spawn a small crosshair UI image that we'll follow with the mouse
+
+    // small cross image (24x24) white cross on transparent background
+    let cx_size: u32 = 24;
+    let mut cross_data = vec![0u8; (cx_size * cx_size * 4) as usize];
+    let mid = (cx_size / 2) as i32;
+    for y in 0..(cx_size as i32) {
+        for x in 0..(cx_size as i32) {
+            let idx = ((y * cx_size as i32 + x) * 4) as usize;
+            // draw a 1px cross centered
+            if x == mid || y == mid {
+                cross_data[idx] = 255;
+                cross_data[idx + 1] = 255;
+                cross_data[idx + 2] = 255;
+                cross_data[idx + 3] = 255;
+            } else {
+                cross_data[idx] = 0;
+                cross_data[idx + 1] = 0;
+                cross_data[idx + 2] = 0;
+                cross_data[idx + 3] = 0;
+            }
+        }
+    }
+    let cross_image = Image::new(
+        Extent3d {
+            width: cx_size,
+            height: cx_size,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        cross_data,
+        TextureFormat::Rgba8UnormSrgb,
+    );
+    let cross_handle = images.add(cross_image);
+
+    // spawn cross UI image; we'll update its Style each frame to follow cursor
+    commands.spawn(ImageBundle {
+        style: Style {
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            bottom: Val::Px(0.0),
+            width: Val::Px(cx_size as f32),
+            height: Val::Px(cx_size as f32),
+            ..default()
+        },
+        image: UiImage::new(cross_handle.clone()),
+        ..default()
+    })
+    .insert(crate::components::CursorCross);
 
     // North (above dial) and South (below dial) indicators
     let dial_left = 8.0_f32;

@@ -99,3 +99,7 @@ rand = "0.8"
 ---
 
 This document is the canonical global specification for the `space_vibe` project. Update it as the design or technical choices evolve.
+
+**Architecture Diagram**
+
+

@@ -2,6 +2,9 @@ use bevy::prelude::*;
 
 use crate::components::{SpeedUi, Shuttle};
 use crate::resources::Throttle;
+use crate::components::CursorCross;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use bevy::window::PrimaryWindow;
 
 pub fn ui_update_system(
     throttle: Res<Throttle>,
@@ -25,5 +28,21 @@ pub fn ui_update_system(
         if deg < 0.0 { deg += 360.0 }
         let rad = deg.to_radians();
         ntrans.rotation = Quat::from_rotation_z(-rad);
+    }
+}
+
+pub fn cursor_follow_system(
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut cross_q: Query<&mut Style, With<CursorCross>>,
+) {
+    let Ok(window) = windows.get_single() else { return };
+    // keep crosshair fixed at screen center
+    let cross_w = 24.0_f32;
+    let left = (window.width() / 2.0) - (cross_w / 2.0);
+    let bottom = (window.height() / 2.0) - (cross_w / 2.0);
+    for mut style in cross_q.iter_mut() {
+        style.position_type = PositionType::Absolute;
+        style.left = Val::Px(left);
+        style.bottom = Val::Px(bottom);
     }
 }
