@@ -28,6 +28,12 @@ pub struct CursorCross;
 pub struct MenuRoot;
 
 #[derive(Component)]
+pub struct MainMenuPanel;
+
+#[derive(Component)]
+pub struct SettingsPanel;
+
+#[derive(Component)]
 pub struct ResumeButton;
 
 #[derive(Component)]
@@ -44,6 +50,9 @@ pub struct SensIncreaseButton;
 
 #[derive(Component)]
 pub struct SensDecreaseButton;
+
+#[derive(Component)]
+pub struct SettingsBackButton;
 
 #[derive(Component)]
 pub struct SensitivityText;

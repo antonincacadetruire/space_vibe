@@ -13,7 +13,7 @@ use systems::ui::cursor_follow_system;
 use systems::collision::asteroid_collision_system;
 use systems::movement::{asteroid_movement_system, player_movement_system};
 use systems::spawner::asteroid_spawner_system;
-use systems::menu::{menu_ui_system, menu_button_system, sensitivity_button_system, sensitivity_text_system, key_capture_system};
+use systems::menu::{button_appearance_system, menu_ui_system, menu_button_system, sensitivity_button_system, sensitivity_text_system, key_capture_system};
 
 const SHUTTLE_SPEED: f32 = 200.0;
 
@@ -39,7 +39,8 @@ fn main() {
                 ui_update_system.after(player_movement_system),
                 cursor_follow_system.after(ui_update_system),
                 menu_ui_system.after(toggle_menu_system),
-                menu_button_system.after(menu_ui_system),
+                button_appearance_system.after(menu_ui_system),
+                menu_button_system.after(button_appearance_system),
                 sensitivity_button_system.after(menu_button_system),
                 sensitivity_text_system.after(sensitivity_button_system),
                 key_capture_system.after(menu_button_system),

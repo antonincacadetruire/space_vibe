@@ -11,6 +11,7 @@ graph TB
   S3[Asteroid Spawner Timer]
   S4[Asteroid Collision]
   S5[Asteroid Movement]
+  S6[Menu UI / Font Fallback]
   R[Main Camera / Player View]
 
   RV[VelocityUpdates resource]
@@ -27,6 +28,7 @@ graph TB
   RV --> S5
   Ast --> S5
   S5 --> Ast
+  S6 --> R
   R --> S4
   R --> S5
 ```

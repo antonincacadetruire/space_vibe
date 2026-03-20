@@ -17,6 +17,7 @@ pub fn toggle_menu_system(
             menu.prev_paused = paused.0;
             paused.0 = true;
             menu.open = true;
+            menu.settings_open = false;
             if let Ok(mut window) = windows.get_single_mut() {
                 window.cursor.visible = true;
                 window.cursor.icon = CursorIcon::Arrow;
@@ -26,6 +27,7 @@ pub fn toggle_menu_system(
             // closing menu: restore previous paused state
             paused.0 = menu.prev_paused;
             menu.open = false;
+            menu.settings_open = false;
             if let Ok(mut window) = windows.get_single_mut() {
                 window.cursor.visible = false;
                 window.cursor.icon = CursorIcon::Crosshair;

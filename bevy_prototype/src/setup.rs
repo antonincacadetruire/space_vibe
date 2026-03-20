@@ -3,6 +3,21 @@ use bevy::window::{PrimaryWindow, Window, CursorIcon, CursorGrabMode};
 
 use crate::systems::spawner::spawn_asteroid;
 
+pub fn resolve_ui_font_path() -> &'static str {
+    use std::path::Path;
+
+    if Path::new("assets/fonts/FiraSans-Bold.ttf").exists() {
+        "fonts/FiraSans-Bold.ttf"
+    } else if Path::new("C:\\Windows\\Fonts\\arial.ttf").exists() {
+        "C:\\Windows\\Fonts\\arial.ttf"
+    } else if Path::new("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf").exists() {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    } else {
+        warn!("No local or system font found; text UI may not render until a font is added to assets/fonts/");
+        "fonts/FiraSans-Bold.ttf"
+    }
+}
+
 pub fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -51,20 +66,8 @@ pub fn setup(
     }
 
     // UI: speed and compass (bottom-left)
-    // Prefer a bundled font in `assets/fonts/`, otherwise try common system fonts.
-    use std::path::Path;
-    let font_path = if Path::new("assets/fonts/FiraSans-Bold.ttf").exists() {
-        "fonts/FiraSans-Bold.ttf"
-    } else if Path::new("C:\\Windows\\Fonts\\arial.ttf").exists() {
-        "C:\\Windows\\Fonts\\arial.ttf"
-    } else if Path::new("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf").exists() {
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-    } else {
-        warn!("No local or system font found; text UI may not render until a font is added to assets/fonts/");
-        "fonts/FiraSans-Bold.ttf"
-    };
-
-    let font = asset_server.load(font_path);
+    // Use the same font fallback logic as the menu so text renders consistently.
+    let font = asset_server.load(resolve_ui_font_path());
 
     // Procedurally generate a simple green dial and a red needle for compass UI
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};

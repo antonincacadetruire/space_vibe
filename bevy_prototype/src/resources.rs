@@ -18,6 +18,7 @@ pub struct TimePaused(pub bool);
 pub struct MenuState {
 	pub open: bool,
 	pub prev_paused: bool,
+	pub settings_open: bool,
 }
 
 #[derive(Resource)]
