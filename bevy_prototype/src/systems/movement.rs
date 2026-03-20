@@ -30,12 +30,12 @@ pub fn player_movement_system(
     let dt = time.delta_seconds();
     // Support configurable keybindings; keep AZERTY fallback for throttle up
     if keyboard.pressed(keyb.throttle_up) || keyboard.pressed(KeyCode::Z) || keyboard.pressed(KeyCode::Up) {
-        throttle.0 += 1000.0 * dt;
+        throttle.0 += 20_000.0 * dt;
     }
     if keyboard.pressed(keyb.throttle_down) || keyboard.pressed(KeyCode::Down) {
-        throttle.0 -= 1000.0 * dt;
+        throttle.0 -= 20_000.0 * dt;
     }
-    throttle.0 = throttle.0.clamp(0.0, 1000.0);
+    throttle.0 = throttle.0.clamp(-50_000.0, 50_000.0);
 
     let forward = transform.rotation.mul_vec3(Vec3::NEG_Z).normalize_or_zero();
     let vertical_up = keyboard.pressed(keyb.vertical_up);
@@ -95,11 +95,7 @@ pub fn asteroid_movement_system(
             }
         }
 
-        if transform.translation.y < -1500.0
-            || transform.translation.y > 2500.0
-            || transform.translation.x.abs() > 5000.0
-            || transform.translation.z.abs() > 5000.0
-        {
+        if transform.translation.length() > 3_000_000.0 {
             commands.entity(entity).despawn_recursive();
             continue;
         }

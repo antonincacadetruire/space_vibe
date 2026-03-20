@@ -6,29 +6,46 @@ graph TB
   M(Mouse Position)
   K(Keyboard Input)
 
-  S1[Mouse Look]
-  S2[Player Movement]
-  S3[Asteroid Spawner Timer]
-  S4[Asteroid Collision]
-  S5[Asteroid Movement]
-  S6[Menu UI / Font Fallback]
+  SS[Procedural Space Scene Setup]
+  SB[Camera-Following Starfield + Nebula Dome]
+  SP[Saturn + Atmosphere]
+  SRI[Asteroid Ring around Saturn]
+  SR[Ring Asteroid Belt]
+  RP[Rapier Physics / Colliders]
+  LB[Bloom + Cinematic Lighting]
+  LOD[Ring LOD System]
+  ML[Mouse Look]
+  PM[Player Movement]
+  AC[Asteroid Collision]
+  AM[Asteroid Movement]
+  UI[Menu UI / Font Fallback]
   R[Main Camera / Player View]
 
   RV[VelocityUpdates resource]
-  RT[AsteroidSpawnTimer]
 
-  M --> S1
-  S1 --> R
-  K --> S2
-  S2 --> R
-  RT --> S3
-  S3 --> Ast[Asteroid Entities]
-  Ast --> S4
-  S4 --> RV
-  RV --> S5
-  Ast --> S5
-  S5 --> Ast
-  S6 --> R
-  R --> S4
-  R --> S5
+  Startup --> SS
+  SS --> SB
+  SS --> SP
+  SS --> SRI
+  SS --> SR
+  SS --> RP
+  SS --> LB
+  SS --> R
+  R --> SB
+
+  M --> ML
+  ML --> R
+  K --> PM
+  PM --> R
+  SR --> Ast[Asteroid Entities]
+  LOD --> SR
+  Ast --> AC
+  AC --> RV
+  RV --> AM
+  Ast --> AM
+  AM --> Ast
+  RP --> Ast
+  UI --> R
+  R --> AC
+  R --> AM
 ```

@@ -5,7 +5,7 @@ use rand::Rng;
 use crate::components::*;
 use crate::resources::{AsteroidSpawnTimer, TimePaused};
 
-fn build_asteroid_mesh(radius: f32, rng: &mut impl Rng) -> Mesh {
+pub fn build_asteroid_mesh(radius: f32, rng: &mut impl Rng) -> Mesh {
     let mut mesh = Mesh::from(shape::UVSphere {
         radius: 1.0,
         sectors: 18,
@@ -68,37 +68,40 @@ pub fn spawn_asteroid(
     rng: &mut impl Rng,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
-) {
-    let x = rng.gen_range(-3200.0..3200.0);
-    let z = rng.gen_range(-3200.0..3200.0);
-    let y = rng.gen_range(900.0..4200.0);
-    let radius = rng.gen_range(28.0..140.0);
-    let vx = rng.gen_range(-20.0..20.0);
-    let vz = rng.gen_range(-20.0..20.0);
-    let vy = rng.gen_range(-60.0..-20.0);
+) -> Vec3 {
+    let orbit_radius = rng.gen_range(400.0..820.0);
+    let angle = rng.gen_range(0.0..std::f32::consts::TAU);
+    let y = rng.gen_range(-18.0..18.0);
+    let radius = rng.gen_range(6.0..18.0);
+
+    let x = angle.cos() * orbit_radius;
+    let z = angle.sin() * orbit_radius;
+    let position = Vec3::new(x, y, z);
 
     let ang_vel = Vec3::new(
-        rng.gen_range(-0.35..0.35),
-        rng.gen_range(-0.35..0.35),
-        rng.gen_range(-0.35..0.35),
+        rng.gen_range(-0.55..0.55),
+        rng.gen_range(-0.55..0.55),
+        rng.gen_range(-0.55..0.55),
     );
 
     commands.spawn((
         PbrBundle {
             mesh: meshes.add(build_asteroid_mesh(radius, rng)),
             material: materials.add(StandardMaterial {
-                base_color: Color::rgb(0.28, 0.26, 0.24),
+                base_color: Color::rgb(0.34, 0.32, 0.30),
                 perceptual_roughness: 1.0,
                 metallic: 0.0,
                 reflectance: 0.04,
                 ..default()
             }),
-            transform: Transform::from_translation(Vec3::new(x, y, z)),
+            transform: Transform::from_translation(position),
             ..default()
         },
         Asteroid,
-        Velocity(Vec3::new(vx, vy, vz)),
+        Velocity(Vec3::ZERO),
         Radius(radius),
         AngularVelocity(ang_vel),
     ));
+
+    position
 }

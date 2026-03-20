@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, Window, CursorIcon, CursorGrabMode};
 
-use crate::systems::spawner::spawn_asteroid;
+use crate::resources::{MouseLook, PrevCameraPosition};
+use crate::systems::space_scene::{make_cinematic_bloom, spawn_space_scene};
 
 pub fn resolve_ui_font_path() -> &'static str {
     use std::path::Path;
@@ -25,21 +26,38 @@ pub fn setup(
     mut images: ResMut<Assets<Image>>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
     asset_server: Res<AssetServer>,
+    mut mouse_look: ResMut<MouseLook>,
+    mut prev_camera_position: ResMut<PrevCameraPosition>,
 ) {
+    let mut rng = rand::thread_rng();
+    let player_transform = spawn_space_scene(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        &mut images,
+        &mut rng,
+    );
+
+    let (yaw, pitch, _) = player_transform.rotation.to_euler(EulerRot::YXZ);
+    mouse_look.yaw = yaw;
+    mouse_look.pitch = pitch;
+    prev_camera_position.0 = player_transform.translation;
+
     commands.spawn((
         Camera3dBundle {
-            transform: Transform::from_xyz(0.0, 200.0, 600.0),
+            transform: player_transform,
             camera: Camera {
                 hdr: true,
                 ..default()
             },
             projection: PerspectiveProjection {
-                far: 10000.0,
+                far: 4_000_000.0,
                 ..default()
             }
             .into(),
             ..default()
         },
+        make_cinematic_bloom(),
         crate::components::MainCamera,
     ));
 
@@ -52,18 +70,20 @@ pub fn setup(
 
     // (OS cursor hidden) — we draw an on-screen UI cross to indicate pointer
 
-    commands.spawn(DirectionalLightBundle {
-        directional_light: DirectionalLight {
-            illuminance: 10000.0,
-            ..default()
-        },
-        ..default()
+    commands.insert_resource(AmbientLight {
+        color: Color::rgb(0.08, 0.09, 0.13),
+        brightness: 0.7,
     });
 
-    let mut rng = rand::thread_rng();
-    for _ in 0..6 {
-        spawn_asteroid(&mut commands, &mut rng, &mut meshes, &mut materials);
-    }
+    commands.spawn(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            illuminance: 13500.0,
+            shadows_enabled: false,
+            ..default()
+        },
+        transform: Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.8, -0.7, 0.0)),
+        ..default()
+    });
 
     // UI: speed and compass (bottom-left)
     // Use the same font fallback logic as the menu so text renders consistently.

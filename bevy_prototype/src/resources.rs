@@ -65,3 +65,6 @@ pub struct Throttle(pub f32);
 
 #[derive(Resource, Default)]
 pub struct PrevCameraPosition(pub Vec3);
+
+#[derive(Resource)]
+pub struct RingLodUpdateTimer(pub Timer);

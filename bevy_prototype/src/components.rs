@@ -27,6 +27,12 @@ pub struct CompassPitchText;
 pub struct AngularVelocity(pub Vec3);
 
 #[derive(Component)]
+pub struct Saturn;
+
+#[derive(Component)]
+pub struct SkyDome;
+
+#[derive(Component)]
 pub struct CursorCross;
 
 // Menu/UI markers

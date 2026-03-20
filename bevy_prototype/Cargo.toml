@@ -5,4 +5,5 @@ edition = "2021"
 
 [dependencies]
 bevy = "0.11"
+bevy_rapier3d = "0.22"
 rand = "0.8"
