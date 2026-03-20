@@ -1,9 +1,6 @@
 use bevy::prelude::*;
 
 #[derive(Component)]
-pub struct Shuttle;
-
-#[derive(Component)]
 pub struct Asteroid;
 
 #[derive(Component)]

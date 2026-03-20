@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use rand::Rng;
 
 use crate::components::*;
-use crate::resources::AsteroidSpawnTimer;
+use crate::resources::{AsteroidSpawnTimer, TimePaused};
 
 pub fn asteroid_spawner_system(
     time: Res<Time>,
@@ -10,7 +10,12 @@ pub fn asteroid_spawner_system(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    paused: Res<TimePaused>,
 ) {
+    if paused.0 {
+        return;
+    }
+
     timer.0.tick(time.delta());
     if timer.0.just_finished() {
         let mut rng = rand::thread_rng();
@@ -24,9 +29,9 @@ pub fn spawn_asteroid(
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
 ) {
-    let x = rng.gen_range(-400.0..400.0);
-    let z = rng.gen_range(-400.0..400.0);
-    let y = rng.gen_range(300.0..700.0);
+    let x = rng.gen_range(-1200.0..1200.0);
+    let z = rng.gen_range(-1200.0..1200.0);
+    let y = rng.gen_range(200.0..1600.0);
     let radius = rng.gen_range(8.0..40.0);
     let vx = rng.gen_range(-30.0..30.0);
     let vz = rng.gen_range(-30.0..30.0);

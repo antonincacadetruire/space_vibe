@@ -1,8 +1,6 @@
 use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, Window, CursorIcon, CursorGrabMode};
-use rand::Rng;
 
-use crate::components::*;
 use crate::systems::spawner::spawn_asteroid;
 
 pub fn setup(
@@ -15,7 +13,16 @@ pub fn setup(
 ) {
     commands.spawn((
         Camera3dBundle {
-            transform: Transform::from_xyz(0.0, 200.0, 600.0).looking_at(Vec3::ZERO, Vec3::Y),
+            transform: Transform::from_xyz(0.0, 200.0, 600.0),
+            camera: Camera {
+                hdr: true,
+                ..default()
+            },
+            projection: PerspectiveProjection {
+                far: 10000.0,
+                ..default()
+            }
+            .into(),
             ..default()
         },
         crate::components::MainCamera,
@@ -37,19 +44,6 @@ pub fn setup(
         },
         ..default()
     });
-
-    commands.spawn((
-        PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Box::new(30.0, 10.0, 20.0))),
-            material: materials.add(StandardMaterial {
-                base_color: Color::rgb(0.2, 0.8, 1.0),
-                ..default()
-            }),
-            transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
-            ..default()
-        },
-        Shuttle,
-    ));
 
     let mut rng = rand::thread_rng();
     for _ in 0..6 {

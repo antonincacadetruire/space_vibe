@@ -4,27 +4,29 @@ game project for school, only vibe coding
 ```mermaid
 graph TB
   M(Mouse Position)
+  K(Keyboard Input)
 
-  S1[Shuttle Steering]
-  S2[Asteroid Spawner Timer]
-  S3[Asteroid Collision]
-  S4[Asteroid Movement]
-  R[Renderer Camera]
+  S1[Mouse Look]
+  S2[Player Movement]
+  S3[Asteroid Spawner Timer]
+  S4[Asteroid Collision]
+  S5[Asteroid Movement]
+  R[Main Camera / Player View]
 
-  RP[ShuttlePosition resource]
   RV[VelocityUpdates resource]
   RT[AsteroidSpawnTimer]
 
   M --> S1
-  S1 --> RP
-  RT --> S2
-  S2 --> Ast[Asteroid Entities]
-  Ast --> S3
-  S3 --> RV
-  RV --> S4
-  Ast --> S4
-  S4 --> Ast
-  RP --> S4
-  S4 --> R
   S1 --> R
+  K --> S2
+  S2 --> R
+  RT --> S3
+  S3 --> Ast[Asteroid Entities]
+  Ast --> S4
+  S4 --> RV
+  RV --> S5
+  Ast --> S5
+  S5 --> Ast
+  R --> S4
+  R --> S5
 ```

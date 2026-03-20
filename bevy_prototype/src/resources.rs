@@ -5,13 +5,13 @@ use std::collections::HashMap;
 pub struct AsteroidSpawnTimer(pub Timer);
 
 #[derive(Resource, Default)]
-pub struct ShuttlePosition(pub Vec3);
-
-#[derive(Resource, Default)]
 pub struct MouseLook {
 	pub yaw: f32,
 	pub pitch: f32,
 }
+
+#[derive(Resource, Default)]
+pub struct TimePaused(pub bool);
 
 #[derive(Resource, Default)]
 pub struct VelocityUpdates(pub HashMap<Entity, Vec3>);

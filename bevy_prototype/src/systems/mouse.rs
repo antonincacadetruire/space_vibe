@@ -1,20 +1,28 @@
 use bevy::prelude::*;
 use bevy::input::mouse::MouseMotion;
 
+use crate::components::MainCamera;
 use crate::resources::MouseLook;
 
-const MAX_YAW_RADIANS: f32 = 0.8;
-const MAX_PITCH_RADIANS: f32 = 0.4;
+use std::f32::consts::PI;
 
 pub fn mouse_look_system(
     mut motion_evr: EventReader<MouseMotion>,
     mut mouse_look: ResMut<MouseLook>,
+    mut camera_q: Query<&mut Transform, With<MainCamera>>,
 ) {
     let sensitivity = 0.0025_f32;
     for ev in motion_evr.iter() {
-        mouse_look.yaw += ev.delta.x * sensitivity;
+        // invert horizontal sign so moving mouse right rotates view to the right
+        mouse_look.yaw -= ev.delta.x * sensitivity;
         mouse_look.pitch += -ev.delta.y * sensitivity;
     }
-    mouse_look.pitch = mouse_look.pitch.clamp(-MAX_PITCH_RADIANS, MAX_PITCH_RADIANS);
-    mouse_look.yaw = mouse_look.yaw.clamp(-MAX_YAW_RADIANS, MAX_YAW_RADIANS);
+
+    // Allow full looping on both axes by wrapping angles into (-PI, PI]
+    mouse_look.yaw = (mouse_look.yaw + PI).rem_euclid(2.0 * PI) - PI;
+    mouse_look.pitch = (mouse_look.pitch + PI).rem_euclid(2.0 * PI) - PI;
+
+    if let Ok(mut transform) = camera_q.get_single_mut() {
+        transform.rotation = Quat::from_euler(EulerRot::YXZ, mouse_look.yaw, mouse_look.pitch, 0.0);
+    }
 }
