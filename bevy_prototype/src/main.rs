@@ -4,7 +4,6 @@ mod setup;
 mod systems;
 
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
 use resources::*;
 use systems::movement::record_camera_position_system;
 use systems::mouse::mouse_look_system;
@@ -22,7 +21,6 @@ const SHUTTLE_SPEED: f32 = 20_000.0;
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         .add_systems(Startup, setup::setup)
         .insert_resource(MouseLook { yaw: 0.0, pitch: 0.0, sensitivity: 1.0 })
         .insert_resource(TimePaused(false))

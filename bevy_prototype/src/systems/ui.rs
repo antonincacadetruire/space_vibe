@@ -2,19 +2,24 @@ use bevy::prelude::*;
 
 use crate::components::{MainCamera, SpeedUi, CompassPitchText};
 use crate::components::CursorCross;
+use bevy::prelude::Time;
+use bevy::ecs::system::ParamSet;
 use crate::resources::{Throttle, MouseLook};
 use bevy::window::PrimaryWindow;
 
 pub fn ui_update_system(
     throttle: Res<Throttle>,
     mouse_look: Res<MouseLook>,
-    mut speed_text_q: Query<&mut Text, (With<SpeedUi>, Without<CompassPitchText>)>,
-    mut pitch_text_q: Query<&mut Text, (With<CompassPitchText>, Without<SpeedUi>)>,
+    mut texts: ParamSet<(
+        Query<&mut Text, (With<SpeedUi>, Without<CompassPitchText>)>,
+        Query<&mut Text, (With<CompassPitchText>, Without<SpeedUi>)>,
+    )>,
+    time: Res<Time>,
     camera_q: Query<&Transform, With<MainCamera>>,
     mut needle_q: Query<&mut Transform, (With<crate::components::CompassNeedle>, Without<MainCamera>)>,
 ) {
     // update speed text
-    if let Ok(mut text) = speed_text_q.get_single_mut() {
+    if let Ok(mut text) = texts.p0().get_single_mut() {
         let speed_val = throttle.0;
         text.sections[0].value = format!("Speed: {:.1}", speed_val);
     }
@@ -32,7 +37,7 @@ pub fn ui_update_system(
         }
     }
 
-    if let Ok(mut text) = pitch_text_q.get_single_mut() {
+    if let Ok(mut text) = texts.p1().get_single_mut() {
         let pitch_deg = mouse_look.pitch.to_degrees();
         text.sections[0].value = format!("PITCH {:+.1}°", pitch_deg);
     }

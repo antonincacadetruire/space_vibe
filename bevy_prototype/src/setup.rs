@@ -105,18 +105,22 @@ pub fn setup(
             let dist = (dist2 as f32).sqrt();
             let idx = ((y * dial_size as i32 + x) * 4) as usize;
             if dist2 <= radius * radius {
-                if dist > radius as f32 * 0.90 {
-                    dial_data[idx] = 40;
-                    dial_data[idx + 1] = 255;
-                    dial_data[idx + 2] = 120;
-                } else if dist > radius as f32 * 0.68 {
-                    dial_data[idx] = 12;
-                    dial_data[idx + 1] = 40;
-                    dial_data[idx + 2] = 18;
-                } else {
+                // neon teal outer rim, darker inner fills for HUD look
+                if dist > radius as f32 * 0.92 {
+                    // bright neon rim
+                    dial_data[idx] = 10;
+                    dial_data[idx + 1] = 240;
+                    dial_data[idx + 2] = 230;
+                } else if dist > radius as f32 * 0.70 {
+                    // mid ring / subtle surface
                     dial_data[idx] = 6;
                     dial_data[idx + 1] = 18;
-                    dial_data[idx + 2] = 14;
+                    dial_data[idx + 2] = 20;
+                } else {
+                    // central darker fill
+                    dial_data[idx] = 3;
+                    dial_data[idx + 1] = 8;
+                    dial_data[idx + 2] = 10;
                 }
                 dial_data[idx + 3] = 255; // a
             } else {
@@ -140,9 +144,10 @@ pub fn setup(
                 let y = sy + dy;
                 if x>=0 && x < dial_size as i32 && y>=0 && y<dial_size as i32 {
                     let idx = ((y * dial_size as i32 + x) * 4) as usize;
-                    dial_data[idx] = 90;
+                    // tick mark bright cyan
+                    dial_data[idx] = 48;
                     dial_data[idx+1] = 255;
-                    dial_data[idx+2] = 170;
+                    dial_data[idx+2] = 240;
                     dial_data[idx+3] = 255;
                 }
             }
@@ -165,10 +170,11 @@ pub fn setup(
             let x = cx + offset;
             if x>=0 && x < dial_size as i32 && y>=0 && y<dial_size as i32 {
                 let idx = ((y * dial_size as i32 + x) * 4) as usize;
-                dial_data[idx] = 60;
+                // small center cross glow in neon cyan
+                dial_data[idx] = 48;
                 dial_data[idx+1] = 255;
-                dial_data[idx+2] = 170;
-                dial_data[idx+3] = 180;
+                dial_data[idx+2] = 240;
+                dial_data[idx+3] = 200;
             }
         }
     }
@@ -197,10 +203,10 @@ pub fn setup(
         for x in 0..(n_w as i32) {
             let idx = ((y * n_w as i32 + x) * 4) as usize;
             if (x - mid).abs() <= half {
-                // cyan/green neon
-                needle_data[idx] = 70;
+                // neon cyan needle
+                needle_data[idx] = 60;
                 needle_data[idx + 1] = 255;
-                needle_data[idx + 2] = 210;
+                needle_data[idx + 2] = 245;
                 needle_data[idx + 3] = 255;
             } else {
                 needle_data[idx] = 0;
@@ -323,7 +329,7 @@ pub fn setup(
             TextStyle {
                 font: font.clone(),
                 font_size: 18.0,
-                color: Color::rgb(0.55, 1.0, 0.8),
+                color: Color::rgb(0.18, 0.95, 1.0),
             },
         ),
         ..default()
@@ -342,7 +348,7 @@ pub fn setup(
             TextStyle {
                 font: font.clone(),
                 font_size: 18.0,
-                color: Color::rgb(0.55, 1.0, 0.8),
+                color: Color::rgb(0.18, 0.95, 1.0),
             },
         ),
         ..default()
@@ -361,7 +367,7 @@ pub fn setup(
             TextStyle {
                 font: font.clone(),
                 font_size: 18.0,
-                color: Color::rgb(0.55, 1.0, 0.8),
+                color: Color::rgb(0.18, 0.95, 1.0),
             },
         ),
         ..default()
@@ -380,7 +386,7 @@ pub fn setup(
             TextStyle {
                 font: font.clone(),
                 font_size: 18.0,
-                color: Color::rgb(0.55, 1.0, 0.8),
+                color: Color::rgb(0.18, 0.95, 1.0),
             },
         ),
         ..default()
@@ -399,7 +405,7 @@ pub fn setup(
             TextStyle {
                 font: font.clone(),
                 font_size: 20.0,
-                color: Color::rgb(0.20, 1.0, 0.35),
+                color: Color::rgb(0.18, 0.95, 0.98),
             },
         ),
         ..default()
@@ -418,7 +424,7 @@ pub fn setup(
             TextStyle {
                 font: font.clone(),
                 font_size: 26.0,
-                color: Color::GREEN,
+                color: Color::rgb(0.18, 0.95, 0.98),
             },
         ),
         ..default()

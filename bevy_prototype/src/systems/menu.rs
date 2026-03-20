@@ -7,12 +7,14 @@ use crate::resources::{MenuState, Keybindings, RebindState, Action, MouseLook};
 use crate::setup::resolve_ui_font_path;
 use crate::systems::exit::apply_game_cursor;
 
-fn green_text_color() -> Color {
-    Color::rgb(0.20, 1.0, 0.35)
+fn hud_text_color() -> Color {
+    // neon teal text used for HUD/menu labels
+    Color::rgb(0.18, 0.95, 0.98)
 }
 
 fn panel_background() -> Color {
-    Color::rgba(0.03, 0.08, 0.03, 0.96)
+    // dark, slightly bluish background for the HUD panel
+    Color::rgba(0.01, 0.04, 0.05, 0.96)
 }
 
 fn panel_style(width: f32, height: f32) -> Style {
@@ -40,27 +42,20 @@ fn button_style(width: f32, height: f32) -> Style {
     }
 }
 
-fn menu_button_palette(is_quit: bool) -> (Color, Color, Color) {
-    if is_quit {
-        (
-            Color::rgb(0.20, 0.07, 0.07),
-            Color::rgb(0.34, 0.10, 0.10),
-            Color::rgb(0.50, 0.14, 0.14),
-        )
-    } else {
-        (
-            Color::rgb(0.05, 0.16, 0.05),
-            Color::rgb(0.09, 0.26, 0.09),
-            Color::rgb(0.14, 0.36, 0.14),
-        )
-    }
+fn menu_button_palette(_is_quit: bool) -> (Color, Color, Color) {
+    // normal, hovered, pressed colors (dark -> brighter neon teal)
+    (
+        Color::rgb(0.03, 0.12, 0.12),
+        Color::rgb(0.06, 0.26, 0.26),
+        Color::rgb(0.10, 0.45, 0.45),
+    )
 }
 
 fn settings_button_palette() -> (Color, Color, Color) {
     (
-        Color::rgb(0.06, 0.18, 0.06),
-        Color::rgb(0.10, 0.30, 0.10),
-        Color::rgb(0.16, 0.42, 0.16),
+        Color::rgb(0.04, 0.14, 0.14),
+        Color::rgb(0.08, 0.22, 0.22),
+        Color::rgb(0.12, 0.36, 0.36),
     )
 }
 
@@ -75,7 +70,7 @@ fn button_fill(interaction: &Interaction, normal: Color, hovered: Color, pressed
 fn spawn_main_menu(panel: &mut ChildBuilder, font: Handle<Font>) {
     panel.spawn(TextBundle::from_section(
         "Menu",
-        TextStyle { font: font.clone(), font_size: 40.0, color: green_text_color() },
+        TextStyle { font: font.clone(), font_size: 40.0, color: hud_text_color() },
     ));
 
     panel
@@ -90,7 +85,7 @@ fn spawn_main_menu(panel: &mut ChildBuilder, font: Handle<Font>) {
         })
         .with_children(|col| {
             let (normal, _, _) = menu_button_palette(false);
-            let label_style = TextStyle { font: font.clone(), font_size: 22.0, color: green_text_color() };
+            let label_style = TextStyle { font: font.clone(), font_size: 22.0, color: hud_text_color() };
 
             col.spawn((ButtonBundle { style: button_style(320.0, 56.0), background_color: normal.into(), ..default() }, ResumeButton))
                 .with_children(|b| {
@@ -112,14 +107,14 @@ fn spawn_main_menu(panel: &mut ChildBuilder, font: Handle<Font>) {
 
     panel.spawn(TextBundle::from_section(
         "Open Settings to adjust mouse sensitivity",
-        TextStyle { font: font.clone(), font_size: 14.0, color: Color::rgb(0.45, 0.85, 0.45) },
+        TextStyle { font: font.clone(), font_size: 14.0, color: Color::rgb(0.25, 0.90, 0.92) },
     ));
 }
 
 fn spawn_settings_menu(panel: &mut ChildBuilder, font: Handle<Font>) {
     panel.spawn(TextBundle::from_section(
         "Settings",
-        TextStyle { font: font.clone(), font_size: 40.0, color: green_text_color() },
+        TextStyle { font: font.clone(), font_size: 40.0, color: hud_text_color() },
     ));
 
     panel
@@ -134,17 +129,17 @@ fn spawn_settings_menu(panel: &mut ChildBuilder, font: Handle<Font>) {
         })
         .with_children(|row| {
             let (normal, _, _) = settings_button_palette();
-            let label_style = TextStyle { font: font.clone(), font_size: 20.0, color: green_text_color() };
+            let label_style = TextStyle { font: font.clone(), font_size: 20.0, color: hud_text_color() };
 
             row.spawn(TextBundle::from_section(
                 "Sensitivity:",
-                TextStyle { font: font.clone(), font_size: 20.0, color: green_text_color() },
+                TextStyle { font: font.clone(), font_size: 20.0, color: hud_text_color() },
             ));
             row.spawn((ButtonBundle { style: button_style(48.0, 48.0), background_color: normal.into(), ..default() }, SensDecreaseButton))
                 .with_children(|b| {
                     b.spawn(TextBundle::from_section("-", label_style.clone()));
                 });
-            row.spawn((TextBundle::from_section("", TextStyle { font: font.clone(), font_size: 22.0, color: green_text_color() }), SensitivityText));
+            row.spawn((TextBundle::from_section("", TextStyle { font: font.clone(), font_size: 22.0, color: hud_text_color() }), SensitivityText));
             row.spawn((ButtonBundle { style: button_style(48.0, 48.0), background_color: normal.into(), ..default() }, SensIncreaseButton))
                 .with_children(|b| {
                     b.spawn(TextBundle::from_section("+", label_style));
@@ -154,7 +149,7 @@ fn spawn_settings_menu(panel: &mut ChildBuilder, font: Handle<Font>) {
     panel.spawn((ButtonBundle { style: button_style(220.0, 50.0), background_color: menu_button_palette(false).0.into(), ..default() }, SettingsBackButton)).with_children(|b| {
         b.spawn(TextBundle::from_section(
             "Back",
-            TextStyle { font: font.clone(), font_size: 20.0, color: green_text_color() },
+            TextStyle { font: font.clone(), font_size: 20.0, color: hud_text_color() },
         ));
     });
 }

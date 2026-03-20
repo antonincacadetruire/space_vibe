@@ -8,8 +8,8 @@ use crate::resources::{AsteroidSpawnTimer, TimePaused};
 pub fn build_asteroid_mesh(radius: f32, rng: &mut impl Rng) -> Mesh {
     let mut mesh = Mesh::from(shape::UVSphere {
         radius: 1.0,
-        sectors: 18,
-        stacks: 12,
+        sectors: 12,
+        stacks: 8,
     });
 
     let stretch_x = rng.gen_range(0.5..1.6);

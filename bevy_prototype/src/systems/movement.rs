@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::components::{Asteroid, MainCamera, Radius, Velocity, AngularVelocity};
+use crate::components::{Asteroid, BeltAsteroid, MainCamera, Radius, Velocity, AngularVelocity};
 use crate::resources::{Throttle, TimePaused, VelocityUpdates, MenuState, Keybindings, PrevCameraPosition};
 
 pub fn player_movement_system(
@@ -68,7 +68,7 @@ pub fn asteroid_movement_system(
         &Radius,
         &mut Transform,
         Option<&AngularVelocity>,
-    ), (With<Asteroid>, Without<MainCamera>)>,
+    ), (With<Asteroid>, Without<MainCamera>, Without<BeltAsteroid>)>,
     camera_q: Query<&Transform, With<MainCamera>>,
     updates: Res<VelocityUpdates>,
     paused: Res<TimePaused>,

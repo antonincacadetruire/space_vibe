@@ -35,6 +35,10 @@ pub struct SkyDome;
 #[derive(Component)]
 pub struct CursorCross;
 
+/// Marker for ring-belt asteroids — excluded from free-flight collision and movement systems.
+#[derive(Component)]
+pub struct BeltAsteroid;
+
 // Menu/UI markers
 #[derive(Component)]
 pub struct MenuRoot;
