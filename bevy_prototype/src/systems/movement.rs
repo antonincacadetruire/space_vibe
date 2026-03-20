@@ -1,35 +1,42 @@
 use bevy::prelude::*;
 
 use crate::components::{Asteroid, MainCamera, Radius, Velocity};
-use crate::resources::{Throttle, TimePaused, VelocityUpdates};
+use crate::resources::{Throttle, TimePaused, VelocityUpdates, MenuState, Keybindings};
 
 pub fn player_movement_system(
     time: Res<Time>,
     mut camera_q: Query<&mut Transform, With<MainCamera>>,
     mut throttle: ResMut<Throttle>,
     mut paused: ResMut<TimePaused>,
+    menu: Res<MenuState>,
+    keyb: Res<Keybindings>,
     keyboard: Res<Input<KeyCode>>,
 ) {
-    if keyboard.just_pressed(KeyCode::Space) {
+    // Toggle pause via keybinding
+    if keyboard.just_pressed(keyb.toggle_pause) {
         paused.0 = !paused.0;
     }
 
-    // Do not block player movement when time is paused — only asteroids/spawner stop.
+    // If the menu is open, prevent player movement
+    if menu.open {
+        return;
+    }
+
     let Ok(mut transform) = camera_q.get_single_mut() else { return };
 
     let dt = time.delta_seconds();
-    // Support common keyboard layouts (QWERTY and AZERTY) and arrows
-    if keyboard.pressed(KeyCode::W) || keyboard.pressed(KeyCode::Z) || keyboard.pressed(KeyCode::Up) {
+    // Support configurable keybindings; keep AZERTY fallback for throttle up
+    if keyboard.pressed(keyb.throttle_up) || keyboard.pressed(KeyCode::Z) || keyboard.pressed(KeyCode::Up) {
         throttle.0 += 1000.0 * dt;
     }
-    if keyboard.pressed(KeyCode::S) || keyboard.pressed(KeyCode::Down) {
+    if keyboard.pressed(keyb.throttle_down) || keyboard.pressed(KeyCode::Down) {
         throttle.0 -= 1000.0 * dt;
     }
     throttle.0 = throttle.0.clamp(0.0, 1000.0);
 
     let forward = transform.rotation.mul_vec3(Vec3::NEG_Z).normalize_or_zero();
-    let vertical_up = keyboard.pressed(KeyCode::E);
-    let vertical_down = keyboard.pressed(KeyCode::Q);
+    let vertical_up = keyboard.pressed(keyb.vertical_up);
+    let vertical_down = keyboard.pressed(keyb.vertical_down);
     let vertical = match (vertical_up, vertical_down) {
         (true, false) => 1.0,
         (false, true) => -1.0,

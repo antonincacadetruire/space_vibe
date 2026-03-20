@@ -22,3 +22,34 @@ pub struct CompassNeedle;
 
 #[derive(Component)]
 pub struct CursorCross;
+
+// Menu/UI markers
+#[derive(Component)]
+pub struct MenuRoot;
+
+#[derive(Component)]
+pub struct ResumeButton;
+
+#[derive(Component)]
+pub struct SettingsButton;
+
+#[derive(Component)]
+pub struct CommandsButton;
+
+#[derive(Component)]
+pub struct QuitButton;
+
+#[derive(Component)]
+pub struct SensIncreaseButton;
+
+#[derive(Component)]
+pub struct SensDecreaseButton;
+
+#[derive(Component)]
+pub struct SensitivityText;
+
+#[derive(Component)]
+pub struct RebindButton;
+
+#[derive(Component)]
+pub struct RebindText;

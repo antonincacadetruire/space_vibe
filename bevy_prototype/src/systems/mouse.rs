@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::input::mouse::MouseMotion;
 
 use crate::components::MainCamera;
-use crate::resources::MouseLook;
+use crate::resources::{MouseLook, MenuState};
 
 use std::f32::consts::PI;
 
@@ -10,8 +10,14 @@ pub fn mouse_look_system(
     mut motion_evr: EventReader<MouseMotion>,
     mut mouse_look: ResMut<MouseLook>,
     mut camera_q: Query<&mut Transform, With<MainCamera>>,
+    menu: Res<MenuState>,
 ) {
-    let sensitivity = 0.0025_f32;
+    // disable mouse look while menu is open
+    if menu.open {
+        return;
+    }
+
+    let sensitivity = mouse_look.sensitivity;
     for ev in motion_evr.iter() {
         // invert horizontal sign so moving mouse right rotates view to the right
         mouse_look.yaw -= ev.delta.x * sensitivity;
