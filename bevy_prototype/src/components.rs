@@ -79,6 +79,17 @@ pub struct RebindButton;
 #[derive(Component)]
 pub struct RebindText;
 
+// ── Missile components ────────────────────────────────────────────────────────
+#[derive(Component)]
+pub struct Missile {
+    pub speed: f32,
+    pub turn_rate: f32, // radians / second
+    pub lifetime: f32,  // seconds remaining
+}
+
+#[derive(Component)]
+pub struct MissileTrail;
+
 // ── Start / death screen markers ─────────────────────────────────────────────
 #[derive(Component)]
 pub struct StartMenuRoot;
@@ -97,3 +108,49 @@ pub struct HomeButton;
 
 #[derive(Component)]
 pub struct TimerUi;
+
+// ── Danger / threat HUD ───────────────────────────────────────────────────────
+#[derive(Component)]
+pub struct MissileWarningUi;
+
+#[derive(Component)]
+pub struct DangerVignette;
+// ── Alien ship component ──────────────────────────────────────────────────────
+#[derive(Component)]
+pub struct AlienShip {
+    pub speed: f32,
+    pub shoot_timer: f32,
+    pub shoot_interval: f32,
+    pub health: i32,
+}
+
+// ── Combat: laser bolt fired by the player ───────────────────────────────────
+#[derive(Component)]
+pub struct Laser {
+    pub speed: f32,
+    pub lifetime: f32,
+}
+
+// ── Expanding portal ring when an alien spawns ────────────────────────────────
+#[derive(Component)]
+pub struct SpawnPortal {
+    /// Negative = pre-delay before animation starts.
+    pub timer: f32,
+    pub max_time: f32,
+}
+
+// ── Expanding explosion sphere effect ────────────────────────────────────────
+#[derive(Component)]
+pub struct Explosion {
+    pub timer: f32,
+    pub max_time: f32,
+    pub max_scale: f32,
+}
+
+// ── Health indicator pip — child entity of AlienShip ─────────────────────────
+#[derive(Component)]
+pub struct AlienHealthPip {
+    pub index: usize,
+    pub mat_active: Handle<StandardMaterial>,
+    pub mat_inactive: Handle<StandardMaterial>,
+}

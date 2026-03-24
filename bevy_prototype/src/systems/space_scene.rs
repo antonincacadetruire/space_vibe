@@ -123,17 +123,18 @@ fn make_starfield_texture(rng: &mut impl Rng) -> Image {
         paint_blob(&mut pixels, width, height, cx, cy, radius, tint);
     }
 
-    for _ in 0..4200 {
+    for _ in 0..500 {
         let x = rng.gen_range(0..width);
         let y = rng.gen_range(0..height);
         let idx = ((y * width + x) * 4) as usize;
-        let brightness = rng.gen_range(170..255) as u8;
+        let brightness = rng.gen_range(200..255) as u8;
         pixels[idx] = brightness;
         pixels[idx + 1] = brightness;
-        pixels[idx + 2] = brightness.saturating_add(rng.gen_range(0..16));
+        pixels[idx + 2] = brightness.saturating_add(rng.gen_range(0..30));
         pixels[idx + 3] = 255;
 
-        if rng.gen_bool(0.2) && x + 1 < width {
+        // ~30% of stars get a 1-pixel halo to look like a point of light
+        if rng.gen_bool(0.3) && x + 1 < width {
             let neighbor = idx + 4;
             pixels[neighbor] = brightness / 2;
             pixels[neighbor + 1] = brightness / 2;

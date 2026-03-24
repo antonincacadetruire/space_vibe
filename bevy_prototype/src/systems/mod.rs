@@ -9,3 +9,6 @@ pub mod fullscreen;
 pub mod menu;
 pub mod start_menu;
 pub mod death_screen;
+pub mod missiles;
+pub mod alien_ships;
+pub mod combat;

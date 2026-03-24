@@ -19,11 +19,15 @@ use systems::start_menu::{
     setup_start_menu, teardown_start_menu,
     start_menu_button_system, start_menu_button_appearance_system,
     enter_playing, spawn_timer_ui, despawn_timer_ui, update_timer,
+    danger_hud_system,
 };
 use systems::death_screen::{
     setup_death_screen, teardown_death_screen,
     death_screen_button_system, death_screen_button_appearance_system,
 };
+use systems::missiles::{missile_spawner_system, missile_movement_system, despawn_missiles};
+use systems::alien_ships::{alien_ship_spawner_system, alien_ship_movement_system, alien_ship_shoot_system, despawn_alien_ships};
+use systems::combat::{shoot_laser_system, laser_movement_system, portal_animation_system, explosion_animation_system, health_pip_update_system, despawn_effects};
 
 const SHUTTLE_SPEED: f32 = 20_000.0;
 
@@ -44,15 +48,20 @@ fn main() {
         .insert_resource(RingLodUpdateTimer(Timer::from_seconds(0.2, TimerMode::Repeating)))
         .insert_resource(GameTimer::default())
         .insert_resource(SpawnTransform::default())
+        .insert_resource(Leaderboard::load())
+        .insert_resource(FreeLook::default())
+        .insert_resource(MissileSpawnTimer(Timer::from_seconds(18.0, TimerMode::Repeating)))
+        .insert_resource(AlienSpawnTimer(Timer::from_seconds(30.0, TimerMode::Repeating)))
+        .insert_resource(DeathCause::default())
         // ── Startup ──────────────────────────────────────────────────────────
         .add_systems(Startup, setup::setup)
         // ── State enter/exit hooks ───────────────────────────────────────────
         .add_systems(OnEnter(GameState::StartMenu), setup_start_menu)
         .add_systems(OnExit(GameState::StartMenu), teardown_start_menu)
         .add_systems(OnEnter(GameState::Playing), (enter_playing, spawn_timer_ui))
-        .add_systems(OnExit(GameState::Playing), despawn_timer_ui)
+        .add_systems(OnExit(GameState::Playing), (despawn_timer_ui, despawn_missiles, despawn_alien_ships, despawn_effects))
         .add_systems(OnEnter(GameState::Dead), setup_death_screen)
-        .add_systems(OnExit(GameState::Dead), teardown_death_screen)
+        .add_systems(OnExit(GameState::Dead), (teardown_death_screen, despawn_missiles, despawn_alien_ships, despawn_effects))
         // ── Update: always ────────────────────────────────────────────────────
         .add_systems(Update, toggle_fullscreen_system)
         // ── Update: StartMenu state ───────────────────────────────────────────
@@ -64,7 +73,7 @@ fn main() {
             )
                 .run_if(in_state(GameState::StartMenu)),
         )
-        // ── Update: Playing state ─────────────────────────────────────────────
+        // ── Update: Playing state (batch A – input / movement / HUD) ────────
         .add_systems(
             Update,
             (
@@ -81,11 +90,29 @@ fn main() {
                 sensitivity_button_system.after(menu_button_system),
                 sensitivity_text_system.after(sensitivity_button_system),
                 key_capture_system.after(menu_button_system),
+                shoot_laser_system,
+            )
+                .run_if(in_state(GameState::Playing)),
+        )
+        // ── Update: Playing state (batch B – world / missiles / scene) ───────
+        .add_systems(
+            Update,
+            (
                 asteroid_collision_system.after(player_movement_system),
                 asteroid_movement_system.after(asteroid_collision_system),
+                missile_spawner_system.after(player_movement_system),
+                missile_movement_system.after(missile_spawner_system),
+                danger_hud_system.after(missile_movement_system),
+                alien_ship_spawner_system,
+                alien_ship_movement_system.after(alien_ship_spawner_system),
+                alien_ship_shoot_system.after(alien_ship_movement_system),
                 follow_sky_dome_system.after(asteroid_movement_system),
                 update_ring_orbit_system.after(asteroid_movement_system),
                 update_ring_lod_system.after(update_ring_orbit_system),
+                laser_movement_system,
+                portal_animation_system,
+                explosion_animation_system,
+                health_pip_update_system,
             )
                 .run_if(in_state(GameState::Playing)),
         )

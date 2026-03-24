@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, Window, CursorGrabMode, CursorIcon};
 
 use crate::components::*;
-use crate::resources::{GameState, GameTimer};
+use crate::resources::{DeathCause, GameState, GameTimer, Leaderboard};
 use crate::setup::resolve_ui_font_path;
 
 // ── Shared style helpers (matching existing menu palette) ────────────────────
@@ -29,13 +29,34 @@ pub fn setup_death_screen(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     game_timer: Res<GameTimer>,
+    death_cause: Res<DeathCause>,
+    mut leaderboard: ResMut<Leaderboard>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
     let t = game_timer.0;
-    let mins = (t / 60.0) as u32;
-    let secs = (t % 60.0) as u32;
-    let tenths = ((t % 1.0) * 10.0) as u32;
-    let score_text = format!("Survived  {:02}:{:02}.{}", mins, secs, tenths);
+    leaderboard.submit(t);
+    leaderboard.save();
+
+    let (death_title, death_subtitle, title_color) = match *death_cause {
+        DeathCause::Missile => (
+            "INTERCEPTED",
+            "Your ship was destroyed by a missile",
+            Color::rgb(0.95, 0.45, 0.05),
+        ),
+        DeathCause::Asteroid => (
+            "CRASHED",
+            "You collided with an asteroid",
+            Color::rgb(0.95, 0.20, 0.20),
+        ),
+    };
+
+    let fmt = |v: f32| {
+        let mins = (v / 60.0) as u32;
+        let secs = (v % 60.0) as u32;
+        let tenths = ((v % 1.0) * 10.0) as u32;
+        format!("{:02}:{:02}.{}", mins, secs, tenths)
+    };
+    let score_text = format!("Survived  {}", fmt(t));
 
     if let Ok(mut window) = windows.get_single_mut() {
         window.cursor.visible = true;
@@ -45,6 +66,12 @@ pub fn setup_death_screen(
 
     let font = asset_server.load(resolve_ui_font_path());
     let label = TextStyle { font: font.clone(), font_size: 22.0, color: hud_text_color() };
+
+    // Build leaderboard lines
+    let lb_lines: Vec<String> = leaderboard.scores.iter().enumerate().map(|(i, &s)| {
+        let medal = match i { 0 => "🥇", 1 => "🥈", _ => "🥉" };
+        format!("{}  {}", medal, fmt(s))
+    }).collect();
 
     commands
         .spawn((
@@ -64,10 +91,10 @@ pub fn setup_death_screen(
             parent
                 .spawn(NodeBundle {
                     style: Style {
-                        width: Val::Px(620.0),
-                        height: Val::Px(440.0),
+                        width: Val::Px(660.0),
+                        height: Val::Px(560.0),
                         margin: UiRect::all(Val::Auto),
-                        padding: UiRect::all(Val::Px(22.0)),
+                        padding: UiRect::all(Val::Px(24.0)),
                         flex_direction: FlexDirection::Column,
                         align_items: AlignItems::Center,
                         justify_content: JustifyContent::SpaceEvenly,
@@ -79,14 +106,30 @@ pub fn setup_death_screen(
                 .with_children(|panel| {
                     // Title
                     panel.spawn(TextBundle::from_section(
-                        "CRASHED",
-                        TextStyle { font: font.clone(), font_size: 52.0, color: Color::rgb(0.95, 0.20, 0.20) },
+                        death_title,
+                        TextStyle { font: font.clone(), font_size: 52.0, color: title_color },
                     ));
-                    // Score
+                    // Subtitle
+                    panel.spawn(TextBundle::from_section(
+                        death_subtitle,
+                        TextStyle { font: font.clone(), font_size: 18.0, color: Color::rgb(0.80, 0.70, 0.50) },
+                    ));
+                    // Score this run
                     panel.spawn(TextBundle::from_section(
                         score_text,
                         TextStyle { font: font.clone(), font_size: 28.0, color: hud_text_color() },
                     ));
+                    // Leaderboard separator
+                    panel.spawn(TextBundle::from_section(
+                        "── Best Runs ──",
+                        TextStyle { font: font.clone(), font_size: 16.0, color: Color::rgb(0.25, 0.90, 0.92) },
+                    ));
+                    for line in &lb_lines {
+                        panel.spawn(TextBundle::from_section(
+                            line.clone(),
+                            TextStyle { font: font.clone(), font_size: 20.0, color: hud_text_color() },
+                        ));
+                    }
                     // Play Again
                     panel
                         .spawn((

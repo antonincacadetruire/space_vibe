@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::components::{Asteroid, BeltAsteroid, MainCamera, Radius, Velocity, AngularVelocity};
-use crate::resources::{Throttle, TimePaused, VelocityUpdates, MenuState, Keybindings, PrevCameraPosition, GameState, GameTimer};
+use crate::resources::{DeathCause, Throttle, TimePaused, VelocityUpdates, MenuState, Keybindings, PrevCameraPosition, GameState, GameTimer, FreeLook};
 
 pub fn player_movement_system(
     time: Res<Time>,
@@ -11,6 +11,7 @@ pub fn player_movement_system(
     menu: Res<MenuState>,
     keyb: Res<Keybindings>,
     keyboard: Res<Input<KeyCode>>,
+    free_look: Res<FreeLook>,
 ) {
     // Toggle pause via keybinding
     if keyboard.just_pressed(keyb.toggle_pause) {
@@ -24,9 +25,6 @@ pub fn player_movement_system(
 
     let Ok(mut transform) = camera_q.get_single_mut() else { return };
 
-    // store previous camera pos at start so other systems can use swept tests
-    // (we'll rely on PrevCameraPosition resource updated each frame elsewhere)
-
     let dt = time.delta_seconds();
     // Support configurable keybindings; keep AZERTY fallback for throttle up
     if keyboard.pressed(keyb.throttle_up) || keyboard.pressed(KeyCode::Z) || keyboard.pressed(KeyCode::Up) {
@@ -37,7 +35,14 @@ pub fn player_movement_system(
     }
     throttle.0 = throttle.0.clamp(-50_000.0, 50_000.0);
 
-    let forward = transform.rotation.mul_vec3(Vec3::NEG_Z).normalize_or_zero();
+    // When free-look is active use saved travel direction, not current camera rotation
+    let travel_rotation = if free_look.active {
+        Quat::from_euler(EulerRot::YXZ, free_look.travel_yaw, free_look.travel_pitch, 0.0)
+    } else {
+        transform.rotation
+    };
+    let forward = travel_rotation.mul_vec3(Vec3::NEG_Z).normalize_or_zero();
+
     let vertical_up = keyboard.pressed(keyb.vertical_up);
     let vertical_down = keyboard.pressed(keyb.vertical_down);
     let vertical = match (vertical_up, vertical_down) {
@@ -72,6 +77,7 @@ pub fn asteroid_movement_system(
     camera_q: Query<&Transform, With<MainCamera>>,
     updates: Res<VelocityUpdates>,
     paused: Res<TimePaused>,
+    mut death_cause: ResMut<DeathCause>,
     prev_cam: Res<PrevCameraPosition>,
     game_timer: Res<GameTimer>,
     mut next_state: ResMut<NextState<GameState>>,
@@ -117,6 +123,7 @@ pub fn asteroid_movement_system(
         if dist < camera_radius + _radius.0 {
             info!("Collision with asteroid (camera/player)! Score: {:.1}s", game_timer.0);
             commands.entity(entity).despawn_recursive();
+            *death_cause = DeathCause::Asteroid;
             next_state.set(GameState::Dead);
         }
     }
