@@ -2,7 +2,8 @@ use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, Window, CursorGrabMode, CursorIcon};
 
 use crate::components::*;
-use crate::resources::{DeathCause, GameState, GameTimer, SpawnTransform, MouseLook, Throttle, TimePaused, PrevCameraPosition, Leaderboard, MissileSpawnTimer, AlienSpawnTimer};use crate::setup::resolve_ui_font_path;
+use crate::resources::{ActiveScene, DeathCause, GameState, GameTimer, KillCount, SceneKind, SceneLeaderboard, SpawnTransform, MouseLook, Throttle, TimePaused, PrevCameraPosition, MissileSpawnTimer, AlienSpawnTimer};
+use crate::setup::resolve_ui_font_path;
 
 // ── Shared style helpers (matching existing menu palette) ────────────────────
 fn hud_text_color() -> Color { Color::rgb(0.18, 0.95, 0.98) }
@@ -23,11 +24,24 @@ fn btn_style() -> Style {
     }
 }
 
+fn wide_btn_style() -> Style {
+    Style {
+        width: Val::Px(580.0),
+        height: Val::Px(80.0),
+        margin: UiRect::all(Val::Px(6.0)),
+        padding: UiRect::all(Val::Px(12.0)),
+        justify_content: JustifyContent::FlexStart,
+        align_items: AlignItems::Center,
+        flex_direction: FlexDirection::Column,
+        ..default()
+    }
+}
+
 // ── OnEnter(GameState::StartMenu) ─────────────────────────────────────────────
 pub fn setup_start_menu(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    leaderboard: Res<Leaderboard>,
+    leaderboard: Res<SceneLeaderboard>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
     if let Ok(mut window) = windows.get_single_mut() {
@@ -45,11 +59,20 @@ pub fn setup_start_menu(
         let tenths = ((v % 1.0) * 10.0) as u32;
         format!("{:02}:{:02}.{}", mins, secs, tenths)
     };
-    let lb_lines: Vec<String> = leaderboard.scores.iter().enumerate().map(|(i, &s)| {
-        let medal = match i { 0 => "#1", 1 => "#2", _ => "#3" };
-        format!("{}  {}", medal, fmt(s))
-    }).collect();
-    let panel_height = if lb_lines.is_empty() { 400.0_f32 } else { 500.0_f32 };
+
+    // Helper: format top scores for a scene into 1–3 short strings.
+    let scene_scores = |scene: &SceneKind| -> Vec<String> {
+        leaderboard.scores(scene).iter().enumerate().map(|(i, &s)| {
+            let medal = match i { 0 => "#1", 1 => "#2", _ => "#3" };
+            format!("{} {}", medal, fmt(s))
+        }).collect()
+    };
+
+    let scenes: [(SceneKind, &str, Color); 3] = [
+        (SceneKind::SpaceAsteroids, "Asteroid Field",  Color::rgb(0.15, 0.90, 0.98)),
+        (SceneKind::IceCaves,       "Ice Caves",        Color::rgb(0.50, 0.80, 1.00)),
+        (SceneKind::DesertPlanet,   "Desert Planet",    Color::rgb(1.00, 0.60, 0.15)),
+    ];
 
     commands
         .spawn((
@@ -58,78 +81,84 @@ pub fn setup_start_menu(
                     width: Val::Percent(100.0),
                     height: Val::Percent(100.0),
                     position_type: PositionType::Absolute,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
                     ..default()
                 },
-                background_color: Color::rgba(0.0, 0.0, 0.0, 0.65).into(),
+                background_color: Color::rgba(0.0, 0.0, 0.0, 0.72).into(),
                 ..default()
             },
             StartMenuRoot,
         ))
-        .with_children(|parent| {
-            parent
-                .spawn(NodeBundle {
-                    style: Style {
-                        width: Val::Px(620.0),
-                        height: Val::Px(panel_height),
-                        margin: UiRect::all(Val::Auto),
-                        padding: UiRect::all(Val::Px(22.0)),
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::SpaceEvenly,
-                        ..default()
-                    },
-                    background_color: panel_background().into(),
+        .with_children(|root| {
+            root.spawn(NodeBundle {
+                style: Style {
+                    width: Val::Px(640.0),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(10.0),
+                    padding: UiRect::all(Val::Px(28.0)),
                     ..default()
-                })
-                .with_children(|panel| {
-                    panel.spawn(TextBundle::from_section(
-                        "SPACE VIBE",
-                        TextStyle { font: font.clone(), font_size: 56.0, color: hud_text_color() },
-                    ));
-                    panel.spawn(TextBundle::from_section(
-                        "Navigate the asteroid field",
-                        TextStyle { font: font.clone(), font_size: 18.0, color: Color::rgb(0.25, 0.90, 0.92) },
-                    ));
-                    // Leaderboard (only when there are entries)
-                    if !lb_lines.is_empty() {
-                        panel.spawn(TextBundle::from_section(
-                            "── Best Runs ──",
-                            TextStyle { font: font.clone(), font_size: 15.0, color: Color::rgb(0.25, 0.90, 0.92) },
+                },
+                background_color: panel_background().into(),
+                ..default()
+            })
+            .with_children(|panel| {
+                // Title
+                panel.spawn(TextBundle::from_section(
+                    "SPACE VIBE",
+                    TextStyle { font: font.clone(), font_size: 56.0, color: hud_text_color() },
+                ));
+                panel.spawn(TextBundle::from_section(
+                    "Choose your mission",
+                    TextStyle { font: font.clone(), font_size: 18.0, color: Color::rgb(0.45, 0.80, 0.85) },
+                ));
+
+                // One scene-select button per scene
+                for (scene, name, accent) in &scenes {
+                    let scores = scene_scores(scene);
+                    // Build score summary string
+                    let score_summary = if scores.is_empty() {
+                        "No runs yet".to_string()
+                    } else {
+                        scores.join("  |  ")
+                    };
+
+                    panel.spawn((
+                        ButtonBundle {
+                            style: wide_btn_style(),
+                            background_color: btn_normal().into(),
+                            ..default()
+                        },
+                        // We can't box-downcast in Bevy, so use a scene-tag component:
+                        SceneSelectButton { scene: scene.clone() },
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn(TextBundle::from_section(
+                            *name,
+                            TextStyle { font: font.clone(), font_size: 26.0, color: *accent },
                         ));
-                        for line in &lb_lines {
-                            panel.spawn(TextBundle::from_section(
-                                line.clone(),
-                                TextStyle { font: font.clone(), font_size: 20.0, color: hud_text_color() },
-                            ));
-                        }
-                    }
-                    // Play button
-                    panel
-                        .spawn((
-                            ButtonBundle {
-                                style: btn_style(),
-                                background_color: btn_normal().into(),
-                                ..default()
-                            },
-                            PlayButton,
-                        ))
-                        .with_children(|b| {
-                            b.spawn(TextBundle::from_section("Play", label.clone()));
-                        });
-                    // Exit button
-                    panel
-                        .spawn((
-                            ButtonBundle {
-                                style: btn_style(),
-                                background_color: btn_normal().into(),
-                                ..default()
-                            },
-                            QuitButton,
-                        ))
-                        .with_children(|b| {
-                            b.spawn(TextBundle::from_section("Exit", label.clone()));
-                        });
-                });
+                        btn.spawn(TextBundle::from_section(
+                            score_summary,
+                            TextStyle { font: font.clone(), font_size: 14.0, color: Color::rgb(0.55, 0.75, 0.75) },
+                        ));
+                    });
+                }
+
+                // Exit button
+                panel
+                    .spawn((
+                        ButtonBundle {
+                            style: btn_style(),
+                            background_color: btn_normal().into(),
+                            ..default()
+                        },
+                        QuitButton,
+                    ))
+                    .with_children(|b| {
+                        b.spawn(TextBundle::from_section("Exit", label.clone()));
+                    });
+            });
         });
 }
 
@@ -143,6 +172,7 @@ pub fn teardown_start_menu(mut commands: Commands, q: Query<Entity, With<StartMe
 // ── OnEnter(GameState::Playing) ───────────────────────────────────────────────
 pub fn enter_playing(
     mut game_timer: ResMut<GameTimer>,
+    mut kill_count: ResMut<KillCount>,
     mut throttle: ResMut<Throttle>,
     mut paused: ResMut<TimePaused>,
     mut mouse_look: ResMut<MouseLook>,
@@ -156,6 +186,7 @@ pub fn enter_playing(
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
     game_timer.0 = 0.0;
+    kill_count.0 = 0;
     throttle.0 = 0.0;
     paused.0 = false;
     *free_look = crate::resources::FreeLook::default();
@@ -169,7 +200,7 @@ pub fn enter_playing(
         *transform = spawn_transform.transform;
     }
     if let Ok(mut window) = windows.get_single_mut() {
-        use crate::systems::exit::apply_game_cursor;
+        use crate::systems::core::exit::apply_game_cursor;
         apply_game_cursor(&mut window);
     }
 }
@@ -177,7 +208,7 @@ pub fn enter_playing(
 // ── OnEnter(GameState::Playing) – spawn timer UI + danger HUD ────────────────
 pub fn spawn_timer_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
     let font = asset_server.load(resolve_ui_font_path());
-    // Timer (top-right)
+    // Timer + kill counter (top-right)
     commands.spawn((
         TextBundle {
             style: Style {
@@ -186,10 +217,16 @@ pub fn spawn_timer_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
                 top: Val::Px(16.0),
                 ..default()
             },
-            text: Text::from_section(
-                "00:00.0",
-                TextStyle { font: font.clone(), font_size: 30.0, color: hud_text_color() },
-            ),
+            text: Text::from_sections([
+                TextSection::new(
+                    "00:00.0",
+                    TextStyle { font: font.clone(), font_size: 30.0, color: hud_text_color() },
+                ),
+                TextSection::new(
+                    "  Kills: 0",
+                    TextStyle { font: font.clone(), font_size: 22.0, color: Color::rgb(0.55, 1.0, 0.35) },
+                ),
+            ]),
             ..default()
         },
         TimerUi,
@@ -242,6 +279,7 @@ pub fn despawn_timer_ui(mut commands: Commands, q: Query<Entity, With<TimerUi>>)
 pub fn update_timer(
     time: Res<Time>,
     paused: Res<TimePaused>,
+    kill_count: Res<KillCount>,
     mut game_timer: ResMut<GameTimer>,
     mut text_q: Query<&mut Text, With<TimerUi>>,
 ) {
@@ -254,18 +292,21 @@ pub fn update_timer(
     let tenths = ((t % 1.0) * 10.0) as u32;
     for mut text in text_q.iter_mut() {
         text.sections[0].value = format!("{:02}:{:02}.{}", mins, secs, tenths);
+        if text.sections.len() > 1 {
+            text.sections[1].value = format!("  Kills: {}", kill_count.0);
+        }
     }
 }
 
 // ── Update – button appearance (start menu only) ─────────────────────────────
 pub fn start_menu_button_appearance_system(
     mut q: Query<
-        (&Interaction, &mut BackgroundColor, Option<&PlayButton>, Option<&QuitButton>),
+        (&Interaction, &mut BackgroundColor, Option<&SceneSelectButton>, Option<&QuitButton>),
         (Changed<Interaction>, With<Button>),
     >,
 ) {
-    for (interaction, mut bg, play, quit) in q.iter_mut() {
-        if play.is_some() || quit.is_some() {
+    for (interaction, mut bg, scene_btn, quit) in q.iter_mut() {
+        if scene_btn.is_some() || quit.is_some() {
             bg.0 = match interaction {
                 Interaction::Pressed => btn_pressed(),
                 Interaction::Hovered => btn_hovered(),
@@ -278,14 +319,16 @@ pub fn start_menu_button_appearance_system(
 // ── Update – button action (start menu only) ─────────────────────────────────
 pub fn start_menu_button_system(
     mut q: Query<
-        (&Interaction, Option<&PlayButton>, Option<&QuitButton>),
+        (&Interaction, Option<&SceneSelectButton>, Option<&QuitButton>),
         (Changed<Interaction>, With<Button>),
     >,
     mut next_state: ResMut<NextState<GameState>>,
+    mut active_scene: ResMut<ActiveScene>,
 ) {
-    for (interaction, play, quit) in q.iter_mut() {
+    for (interaction, scene_btn, quit) in q.iter_mut() {
         if *interaction == Interaction::Pressed {
-            if play.is_some() {
+            if let Some(SceneSelectButton { scene }) = scene_btn {
+                active_scene.0 = scene.clone();
                 next_state.set(GameState::Playing);
             } else if quit.is_some() {
                 std::process::exit(0);

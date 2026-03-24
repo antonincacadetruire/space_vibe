@@ -10,64 +10,83 @@ graph TB
   GS_PL[GameState: Playing]
   GS_DE[GameState: Dead]
 
-  SM[Start Menu - Title + Play Button]
-  DS[Death Screen - Score + PlayAgain + MainMenu]
-  TI[Timer UI - top-right HUD]
+  SM[Start Menu - Scene Selection + Per-Scene Best Times]
+  DS[Death Screen - Score + Kill Count + PlayAgain + MainMenu]
+  TI[Timer + Kill Count HUD - top-right]
+  MM[Minimap - bottom-right - enemy radar]
 
-  SS[Procedural Space Scene Setup]
+  ActiveScene[ActiveScene Resource - SpaceAsteroids / IceCaves / DesertPlanet]
+  KillCount[KillCount Resource - reset on enter Playing]
+  SL[SceneLeaderboard - top-3 per scene persisted to .dat files]
+
+  SceneMgr[spawn_active_scene_system]
+  SS[Space Asteroids Scene - Saturn ring belt]
+  IC[Ice Caves Scene - giant asteroid interior]
+  DP[Desert Planet Scene - horizon dunes mountains]
+  SceneClean[despawn_scene_entities - SceneEntity marker]
+
   SB[Camera-Following Starfield + Nebula Dome]
   SP[Saturn + Atmosphere]
-  SRI[Asteroid Ring around Saturn]
-  SR[Ring Asteroid Belt]
-  BP[Asteroid Broadphase Grid - free asteroids only]
-  LB[Bloom + Cinematic Lighting]
-  LOD[Distance-Based Asteroid LOD - sqrt-free]
+  LOD[Distance-Based Asteroid LOD]
   ML[Mouse Look]
   PM[Player Movement]
-  AC[Asteroid Collision - BeltAsteroids excluded]
-  AM[Asteroid Movement - BeltAsteroids excluded]
-  OB[Orbit + AngularVel + Collision - belt only]
-  UI[Menu UI / Font Fallback]
+  AC[Asteroid Collision]
+  AM[Asteroid Movement]
+  UI[Menu UI]
   R[Main Camera / Player View]
+  BP[Bloom + Cinematic Lighting]
+  AL[Alien Ships - patrol + shoot]
+  MS[Homing Missiles - proportional nav]
+  CB[Combat - lasers + explosions + health pips]
+  LB[Leaderboard submit on death]
 
-  RV[VelocityUpdates resource]
-  MP[Material Palette - 8 shared handles for GPU instancing]
-
-  Startup --> SS
-  SS --> SB
-  SS --> SP
-  SS --> SRI
-  SS --> SR
-  SS --> MP
-  MP --> SR
-  SS --> LB
-  SS --> R
-  R --> SB
+  Startup --> R
 
   GS_SM --> SM
+  SM -- Scene chosen --> ActiveScene
+  ActiveScene --> SceneMgr
   SM -- Play clicked --> GS_PL
+  GS_PL --> SceneMgr
+  SceneMgr -- SpaceAsteroids --> SS
+  SceneMgr -- IceCaves --> IC
+  SceneMgr -- DesertPlanet --> DP
   GS_PL --> TI
-  GS_PL -- collision detected --> GS_DE
+  GS_PL --> MM
+  GS_PL -- collision / missile hit --> GS_DE
   GS_DE --> DS
+  GS_DE --> LB
+  LB --> SL
   DS -- Play Again --> GS_PL
   DS -- Main Menu --> GS_SM
+  GS_PL -- exit --> SceneClean
 
   M --> ML
   ML --> R
   K --> PM
   PM --> R
-  SR --> Ast[BeltAsteroid Entities - no Rapier]
-  LOD --> SR
-  Ast --> AC
-  AC --> RV
-  RV --> AM
-  AM --> AM
-  Ast --> OB
-  OB --> Ast
-  OB -- player hit --> GS_DE
-  AM -- player hit --> GS_DE
-  UI --> R
-  R --> OB
+
+  SS --> SB
+  SS --> SP
+  SS --> LOD
+  IC --> BP
+  DP --> BP
+
+  AL --> CB
+  MS --> CB
+  CB --> KillCount
+  CB -- alien destroyed + score --> LB
+
+  MM --> AL
+```
+
+## Project Structure
+
+```
+systems/
+  core/       – collision, exit, fullscreen, mouse, movement, spawner
+  enemies/    – alien_ships, missiles, combat
+  scenes/     – space_scene, ice_caves, desert_planet, scene_manager
+  ui/         – menu, start_menu, death_screen, hud, minimap
 ```
 
 ## Performance Architecture

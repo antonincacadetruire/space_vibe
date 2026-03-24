@@ -5,7 +5,7 @@ use bevy::window::{PrimaryWindow, Window};
 use crate::components::*;
 use crate::resources::{MenuState, Keybindings, RebindState, Action, MouseLook};
 use crate::setup::resolve_ui_font_path;
-use crate::systems::exit::apply_game_cursor;
+use crate::systems::core::exit::apply_game_cursor;
 
 fn hud_text_color() -> Color {
     // neon teal text used for HUD/menu labels

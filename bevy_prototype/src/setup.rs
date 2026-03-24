@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, Window, CursorIcon, CursorGrabMode};
 
 use crate::resources::{MouseLook, PrevCameraPosition, SpawnTransform};
-use crate::systems::space_scene::{make_cinematic_bloom, spawn_space_scene};
+use crate::systems::scenes::space_scene::make_cinematic_bloom;
 
 pub fn resolve_ui_font_path() -> &'static str {
     use std::path::Path;
@@ -29,26 +29,18 @@ pub fn setup(
     mut mouse_look: ResMut<MouseLook>,
     mut prev_camera_position: ResMut<PrevCameraPosition>,
 ) {
-    let mut rng = rand::thread_rng();
-    let player_transform = spawn_space_scene(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        &mut images,
-        &mut rng,
-    );
-
-    let (yaw, pitch, _) = player_transform.rotation.to_euler(EulerRot::YXZ);
-    mouse_look.yaw = yaw;
-    mouse_look.pitch = pitch;
-    prev_camera_position.0 = player_transform.translation;
-
-    // Store initial camera placement for respawn
-    commands.insert_resource(SpawnTransform { transform: player_transform, yaw, pitch });
+    // Camera starts at a neutral position; the actual spawn position is set
+    // by spawn_active_scene_system when OnEnter(Playing) fires.
+    let default_transform = Transform::from_xyz(0.0, 5_000.0, 60_000.0)
+        .looking_at(Vec3::ZERO, Vec3::Y);
+    mouse_look.yaw = 0.0;
+    mouse_look.pitch = 0.0;
+    prev_camera_position.0 = default_transform.translation;
+    commands.insert_resource(SpawnTransform { transform: default_transform, yaw: 0.0, pitch: 0.0 });
 
     commands.spawn((
         Camera3dBundle {
-            transform: player_transform,
+            transform: default_transform,
             camera: Camera {
                 hdr: true,
                 ..default()
@@ -73,21 +65,6 @@ pub fn setup(
     }
 
     // (OS cursor hidden) — we draw an on-screen UI cross to indicate pointer
-
-    commands.insert_resource(AmbientLight {
-        color: Color::rgb(0.08, 0.09, 0.13),
-        brightness: 0.7,
-    });
-
-    commands.spawn(DirectionalLightBundle {
-        directional_light: DirectionalLight {
-            illuminance: 13500.0,
-            shadows_enabled: false,
-            ..default()
-        },
-        transform: Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.8, -0.7, 0.0)),
-        ..default()
-    });
 
     // UI: speed and compass (bottom-left)
     // Use the same font fallback logic as the menu so text renders consistently.

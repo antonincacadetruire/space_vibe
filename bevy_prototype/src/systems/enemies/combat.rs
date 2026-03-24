@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::components::{AlienHealthPip, AlienShip, Explosion, Laser, MainCamera, SpawnPortal};
-use crate::resources::TimePaused;
+use crate::resources::{KillCount, TimePaused};
 
 // ── Player shoots a laser bolt on left-click ──────────────────────────────────
 pub fn shoot_laser_system(
@@ -47,6 +47,7 @@ pub fn laser_movement_system(
     mut materials: ResMut<Assets<StandardMaterial>>,
     time: Res<Time>,
     paused: Res<TimePaused>,
+    mut kill_count: ResMut<KillCount>,
     mut lasers: Query<(Entity, &mut Transform, &mut Laser)>,
     mut aliens: Query<(Entity, &Transform, &mut AlienShip), Without<Laser>>,
 ) {
@@ -115,6 +116,7 @@ pub fn laser_movement_system(
         }
 
         if killed {
+            kill_count.0 += 1;
             // Big orange kill explosion
             commands.spawn((
                 PbrBundle {

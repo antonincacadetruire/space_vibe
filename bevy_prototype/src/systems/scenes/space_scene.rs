@@ -5,7 +5,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use rand::Rng;
 use std::f32::consts::TAU;
 
-use crate::components::{AngularVelocity, Asteroid, BeltAsteroid, MainCamera, Radius, Saturn, SkyDome, Velocity};
+use crate::components::{AngularVelocity, Asteroid, BeltAsteroid, MainCamera, Radius, Saturn, SceneEntity, SkyDome, Velocity};
 use crate::resources::{PrevCameraPosition, RingLodUpdateTimer, TimePaused, GameState, GameTimer};
 
 const SCENE_SCALE: f32 = 100.0;
@@ -340,6 +340,7 @@ fn spawn_ring_asteroid(
         Velocity(Vec3::ZERO),
         Radius(base_radius),
         AngularVelocity(spin),
+        SceneEntity,
     ));
 
     (position, base_radius)
@@ -471,6 +472,7 @@ pub fn spawn_space_scene(
         ..default()
         },
         SkyDome,
+        SceneEntity,
     ));
 
     commands.spawn((
@@ -490,6 +492,7 @@ pub fn spawn_space_scene(
         ..default()
         },
         SkyDome,
+        SceneEntity,
     ));
 
     commands.spawn((
@@ -509,9 +512,10 @@ pub fn spawn_space_scene(
             ..default()
         },
         Saturn,
+        SceneEntity,
     ));
 
-    commands.spawn(PbrBundle {
+    commands.spawn((PbrBundle {
         mesh: meshes.add(Mesh::from(shape::UVSphere {
             radius: SATURN_RADIUS * 1.04,
             sectors: 36,
@@ -526,9 +530,9 @@ pub fn spawn_space_scene(
             ..default()
         }),
         ..default()
-    });
+    }, SceneEntity));
 
-    commands.spawn(DirectionalLightBundle {
+    commands.spawn((DirectionalLightBundle {
         directional_light: DirectionalLight {
             illuminance: 180_000.0,
             shadows_enabled: false, // Shadow maps across 1080 asteroids tanks performance.
@@ -536,9 +540,9 @@ pub fn spawn_space_scene(
         },
         transform: Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.9, -1.0, 0.0)),
         ..default()
-    });
+    }, SceneEntity));
 
-    commands.spawn(PointLightBundle {
+    commands.spawn((PointLightBundle {
         point_light: PointLight {
             intensity: 6_500_000.0,
             range: 250_000.0,
@@ -548,7 +552,7 @@ pub fn spawn_space_scene(
         },
         transform: Transform::from_translation(Vec3::new(-120_000.0, 80_000.0, 30_000.0)),
         ..default()
-    });
+    }, SceneEntity));
 
     commands.insert_resource(AmbientLight {
         color: Color::rgb(0.08, 0.10, 0.16),

@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, Window, CursorGrabMode, CursorIcon};
 
 use crate::components::*;
-use crate::resources::{DeathCause, GameState, GameTimer, Leaderboard};
+use crate::resources::{ActiveScene, DeathCause, GameState, GameTimer, KillCount, SceneLeaderboard};
 use crate::setup::resolve_ui_font_path;
 
 // ── Shared style helpers (matching existing menu palette) ────────────────────
@@ -30,12 +30,14 @@ pub fn setup_death_screen(
     asset_server: Res<AssetServer>,
     game_timer: Res<GameTimer>,
     death_cause: Res<DeathCause>,
-    mut leaderboard: ResMut<Leaderboard>,
+    kill_count: Res<KillCount>,
+    active_scene: Res<ActiveScene>,
+    mut leaderboard: ResMut<SceneLeaderboard>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
     let t = game_timer.0;
-    leaderboard.submit(t);
-    leaderboard.save();
+    leaderboard.submit(&active_scene.0, t);
+    leaderboard.save(&active_scene.0);
 
     let (death_title, death_subtitle, title_color) = match *death_cause {
         DeathCause::Missile => (
@@ -56,7 +58,8 @@ pub fn setup_death_screen(
         let tenths = ((v % 1.0) * 10.0) as u32;
         format!("{:02}:{:02}.{}", mins, secs, tenths)
     };
-    let score_text = format!("Survived  {}", fmt(t));
+    let score_text = format!("Survived {}   Kills: {}", fmt(t), kill_count.0);
+    let scene_name = active_scene.0.label();
 
     if let Ok(mut window) = windows.get_single_mut() {
         window.cursor.visible = true;
@@ -67,9 +70,10 @@ pub fn setup_death_screen(
     let font = asset_server.load(resolve_ui_font_path());
     let label = TextStyle { font: font.clone(), font_size: 22.0, color: hud_text_color() };
 
-    // Build leaderboard lines
-    let lb_lines: Vec<String> = leaderboard.scores.iter().enumerate().map(|(i, &s)| {
-        let medal = match i { 0 => "🥇", 1 => "🥈", _ => "🥉" };
+    // Build leaderboard lines for the active scene
+    let scores = leaderboard.scores(&active_scene.0);
+    let lb_lines: Vec<String> = scores.iter().enumerate().map(|(i, &s)| {
+        let medal = match i { 0 => "#1", 1 => "#2", _ => "#3" };
         format!("{}  {}", medal, fmt(s))
     }).collect();
 
@@ -108,6 +112,11 @@ pub fn setup_death_screen(
                     panel.spawn(TextBundle::from_section(
                         death_title,
                         TextStyle { font: font.clone(), font_size: 52.0, color: title_color },
+                    ));
+                    // Scene name (small subtitle above death reason)
+                    panel.spawn(TextBundle::from_section(
+                        scene_name,
+                        TextStyle { font: font.clone(), font_size: 16.0, color: Color::rgb(0.55, 0.75, 0.90) },
                     ));
                     // Subtitle
                     panel.spawn(TextBundle::from_section(

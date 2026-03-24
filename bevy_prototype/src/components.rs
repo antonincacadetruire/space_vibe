@@ -154,3 +154,18 @@ pub struct AlienHealthPip {
     pub mat_active: Handle<StandardMaterial>,
     pub mat_inactive: Handle<StandardMaterial>,
 }
+
+// ── Marks entities belonging to the active scene (cleaned up on scene exit) ───
+#[derive(Component)]
+pub struct SceneEntity;
+
+// ── Scene selection button data ───────────────────────────────────────────────
+#[derive(Component)]
+pub struct SceneSelectButton {
+    pub scene: crate::resources::SceneKind,
+}
+
+// ── Per-scene play button markers (for simplifying button queries) ────────────
+#[derive(Component)] pub struct PlaySpaceButton;
+#[derive(Component)] pub struct PlayIceButton;
+#[derive(Component)] pub struct PlayDesertButton;

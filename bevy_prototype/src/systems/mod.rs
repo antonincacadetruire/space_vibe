@@ -1,14 +1,9 @@
-pub mod collision;
-pub mod movement;
-pub mod spawner;
-pub mod space_scene;
+// ── Core gameplay (movement, input, collisions) ─────────────────────────────
+pub mod core;
+// ── Enemy systems (aliens, missiles, combat) ───────────────────────────────
+pub mod enemies;
+// ── Scene definitions (space, ice caves, desert) ──────────────────────────
+pub mod scenes;
+// ── UI (menus, HUD, minimap) ───────────────────────────────────────────────
 pub mod ui;
-pub mod mouse;
-pub mod exit;
-pub mod fullscreen;
-pub mod menu;
-pub mod start_menu;
-pub mod death_screen;
-pub mod missiles;
-pub mod alien_ships;
-pub mod combat;
+
