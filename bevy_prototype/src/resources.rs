@@ -1,6 +1,27 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+// ── Game states ──────────────────────────────────────────────────────────────
+#[derive(States, Debug, Clone, Eq, PartialEq, Hash, Default)]
+pub enum GameState {
+    #[default]
+    StartMenu,
+    Playing,
+    Dead,
+}
+
+// ── Gameplay timer (seconds elapsed since round start) ───────────────────────
+#[derive(Resource, Default)]
+pub struct GameTimer(pub f32);
+
+// ── Initial camera spawn transform (used for respawn) ────────────────────────
+#[derive(Resource, Default)]
+pub struct SpawnTransform {
+    pub transform: Transform,
+    pub yaw: f32,
+    pub pitch: f32,
+}
+
 #[derive(Resource)]
 pub struct AsteroidSpawnTimer(pub Timer);
 

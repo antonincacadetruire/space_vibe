@@ -6,6 +6,14 @@ graph TB
   M(Mouse Position)
   K(Keyboard Input)
 
+  GS_SM[GameState: StartMenu]
+  GS_PL[GameState: Playing]
+  GS_DE[GameState: Dead]
+
+  SM[Start Menu - Title + Play Button]
+  DS[Death Screen - Score + PlayAgain + MainMenu]
+  TI[Timer UI - top-right HUD]
+
   SS[Procedural Space Scene Setup]
   SB[Camera-Following Starfield + Nebula Dome]
   SP[Saturn + Atmosphere]
@@ -36,6 +44,14 @@ graph TB
   SS --> R
   R --> SB
 
+  GS_SM --> SM
+  SM -- Play clicked --> GS_PL
+  GS_PL --> TI
+  GS_PL -- collision detected --> GS_DE
+  GS_DE --> DS
+  DS -- Play Again --> GS_PL
+  DS -- Main Menu --> GS_SM
+
   M --> ML
   ML --> R
   K --> PM
@@ -48,6 +64,8 @@ graph TB
   AM --> AM
   Ast --> OB
   OB --> Ast
+  OB -- player hit --> GS_DE
+  AM -- player hit --> GS_DE
   UI --> R
   R --> OB
 ```

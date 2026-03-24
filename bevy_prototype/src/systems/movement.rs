@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::components::{Asteroid, BeltAsteroid, MainCamera, Radius, Velocity, AngularVelocity};
-use crate::resources::{Throttle, TimePaused, VelocityUpdates, MenuState, Keybindings, PrevCameraPosition};
+use crate::resources::{Throttle, TimePaused, VelocityUpdates, MenuState, Keybindings, PrevCameraPosition, GameState, GameTimer};
 
 pub fn player_movement_system(
     time: Res<Time>,
@@ -73,6 +73,8 @@ pub fn asteroid_movement_system(
     updates: Res<VelocityUpdates>,
     paused: Res<TimePaused>,
     prev_cam: Res<PrevCameraPosition>,
+    game_timer: Res<GameTimer>,
+    mut next_state: ResMut<NextState<GameState>>,
 ) {
     if paused.0 {
         return;
@@ -113,8 +115,9 @@ pub fn asteroid_movement_system(
         let dist = (transform.translation - closest).length();
         let camera_radius = 12.0; // slightly larger to be forgiving
         if dist < camera_radius + _radius.0 {
-            info!("Collision with asteroid (camera/player)!");
+            info!("Collision with asteroid (camera/player)! Score: {:.1}s", game_timer.0);
             commands.entity(entity).despawn_recursive();
+            next_state.set(GameState::Dead);
         }
     }
 }

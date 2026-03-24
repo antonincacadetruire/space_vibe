@@ -7,3 +7,5 @@ pub mod mouse;
 pub mod exit;
 pub mod fullscreen;
 pub mod menu;
+pub mod start_menu;
+pub mod death_screen;

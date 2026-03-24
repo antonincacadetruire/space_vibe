@@ -78,3 +78,22 @@ pub struct RebindButton;
 
 #[derive(Component)]
 pub struct RebindText;
+
+// ── Start / death screen markers ─────────────────────────────────────────────
+#[derive(Component)]
+pub struct StartMenuRoot;
+
+#[derive(Component)]
+pub struct DeathScreenRoot;
+
+#[derive(Component)]
+pub struct PlayButton;
+
+#[derive(Component)]
+pub struct PlayAgainButton;
+
+#[derive(Component)]
+pub struct HomeButton;
+
+#[derive(Component)]
+pub struct TimerUi;

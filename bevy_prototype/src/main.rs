@@ -15,13 +15,24 @@ use systems::collision::asteroid_collision_system;
 use systems::movement::{asteroid_movement_system, player_movement_system};
 use systems::space_scene::{follow_sky_dome_system, update_ring_lod_system, update_ring_orbit_system};
 use systems::menu::{button_appearance_system, menu_ui_system, menu_button_system, sensitivity_button_system, sensitivity_text_system, key_capture_system};
+use systems::start_menu::{
+    setup_start_menu, teardown_start_menu,
+    start_menu_button_system, start_menu_button_appearance_system,
+    enter_playing, spawn_timer_ui, despawn_timer_ui, update_timer,
+};
+use systems::death_screen::{
+    setup_death_screen, teardown_death_screen,
+    death_screen_button_system, death_screen_button_appearance_system,
+};
 
 const SHUTTLE_SPEED: f32 = 20_000.0;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_systems(Startup, setup::setup)
+        // ── State ────────────────────────────────────────────────────────────
+        .add_state::<GameState>()
+        // ── Resources ────────────────────────────────────────────────────────
         .insert_resource(MouseLook { yaw: 0.0, pitch: 0.0, sensitivity: 1.0 })
         .insert_resource(TimePaused(false))
         .insert_resource(MenuState::default())
@@ -31,16 +42,39 @@ fn main() {
         .insert_resource(PrevCameraPosition::default())
         .insert_resource(VelocityUpdates::default())
         .insert_resource(RingLodUpdateTimer(Timer::from_seconds(0.2, TimerMode::Repeating)))
+        .insert_resource(GameTimer::default())
+        .insert_resource(SpawnTransform::default())
+        // ── Startup ──────────────────────────────────────────────────────────
+        .add_systems(Startup, setup::setup)
+        // ── State enter/exit hooks ───────────────────────────────────────────
+        .add_systems(OnEnter(GameState::StartMenu), setup_start_menu)
+        .add_systems(OnExit(GameState::StartMenu), teardown_start_menu)
+        .add_systems(OnEnter(GameState::Playing), (enter_playing, spawn_timer_ui))
+        .add_systems(OnExit(GameState::Playing), despawn_timer_ui)
+        .add_systems(OnEnter(GameState::Dead), setup_death_screen)
+        .add_systems(OnExit(GameState::Dead), teardown_death_screen)
+        // ── Update: always ────────────────────────────────────────────────────
+        .add_systems(Update, toggle_fullscreen_system)
+        // ── Update: StartMenu state ───────────────────────────────────────────
+        .add_systems(
+            Update,
+            (
+                start_menu_button_appearance_system,
+                start_menu_button_system.after(start_menu_button_appearance_system),
+            )
+                .run_if(in_state(GameState::StartMenu)),
+        )
+        // ── Update: Playing state ─────────────────────────────────────────────
         .add_systems(
             Update,
             (
                 mouse_look_system,
                 toggle_menu_system,
-                toggle_fullscreen_system,
                 player_movement_system.after(mouse_look_system),
                 record_camera_position_system.after(player_movement_system),
                 ui_update_system.after(player_movement_system),
                 cursor_follow_system.after(ui_update_system),
+                update_timer.after(player_movement_system),
                 menu_ui_system.after(toggle_menu_system),
                 button_appearance_system.after(menu_ui_system),
                 menu_button_system.after(button_appearance_system),
@@ -52,7 +86,18 @@ fn main() {
                 follow_sky_dome_system.after(asteroid_movement_system),
                 update_ring_orbit_system.after(asteroid_movement_system),
                 update_ring_lod_system.after(update_ring_orbit_system),
-            ),
+            )
+                .run_if(in_state(GameState::Playing)),
+        )
+        // ── Update: Dead state ────────────────────────────────────────────────
+        .add_systems(
+            Update,
+            (
+                death_screen_button_appearance_system,
+                death_screen_button_system.after(death_screen_button_appearance_system),
+            )
+                .run_if(in_state(GameState::Dead)),
         )
         .run();
 }
+

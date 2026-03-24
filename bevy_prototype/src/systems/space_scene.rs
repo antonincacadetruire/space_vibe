@@ -6,7 +6,7 @@ use rand::Rng;
 use std::f32::consts::TAU;
 
 use crate::components::{AngularVelocity, Asteroid, BeltAsteroid, MainCamera, Radius, Saturn, SkyDome, Velocity};
-use crate::resources::{PrevCameraPosition, RingLodUpdateTimer, TimePaused};
+use crate::resources::{PrevCameraPosition, RingLodUpdateTimer, TimePaused, GameState, GameTimer};
 
 const SCENE_SCALE: f32 = 100.0;
 const SATURN_RADIUS: f32 = 260.0 * SCENE_SCALE;
@@ -351,6 +351,8 @@ pub fn update_ring_orbit_system(
     camera_q: Query<&Transform, (With<MainCamera>, Without<Asteroid>)>,
     prev_cam: Res<PrevCameraPosition>,
     mut asteroids: Query<(Entity, &mut Transform, &mut RingAsteroid, Option<&AngularVelocity>, &Radius), (With<Asteroid>, Without<MainCamera>)>,
+    game_timer: Res<GameTimer>,
+    mut next_state: ResMut<NextState<GameState>>,
 ) {
     if paused.0 {
         return;
@@ -402,8 +404,9 @@ pub fn update_ring_orbit_system(
             let t = if seg_len_sq > 0.0 { seg.dot(to_center) / seg_len_sq } else { 0.0 };
             let closest = cam_start + seg * t.clamp(0.0, 1.0);
             if (transform.translation - closest).length() < collision_threshold {
-                info!("Collision with ring asteroid!");
+                info!("Collision with ring asteroid! Score: {:.1}s", game_timer.0);
                 commands.entity(entity).despawn_recursive();
+                next_state.set(GameState::Dead);
             }
         }
     }

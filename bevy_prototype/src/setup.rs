@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, Window, CursorIcon, CursorGrabMode};
 
-use crate::resources::{MouseLook, PrevCameraPosition};
+use crate::resources::{MouseLook, PrevCameraPosition, SpawnTransform};
 use crate::systems::space_scene::{make_cinematic_bloom, spawn_space_scene};
 
 pub fn resolve_ui_font_path() -> &'static str {
@@ -43,6 +43,9 @@ pub fn setup(
     mouse_look.pitch = pitch;
     prev_camera_position.0 = player_transform.translation;
 
+    // Store initial camera placement for respawn
+    commands.insert_resource(SpawnTransform { transform: player_transform, yaw, pitch });
+
     commands.spawn((
         Camera3dBundle {
             transform: player_transform,
@@ -61,11 +64,12 @@ pub fn setup(
         crate::components::MainCamera,
     ));
 
-    // Hide the OS cursor so only our UI crosshair indicates direction
+    // Start with visible cursor — the start menu is the first screen shown.
+    // OnEnter(GameState::Playing) will lock it when gameplay begins.
     if let Ok(mut window) = windows.get_single_mut() {
-        window.cursor.visible = false;
-        window.cursor.icon = CursorIcon::Crosshair;
-        window.cursor.grab_mode = CursorGrabMode::Locked;
+        window.cursor.visible = true;
+        window.cursor.icon = CursorIcon::Arrow;
+        window.cursor.grab_mode = CursorGrabMode::None;
     }
 
     // (OS cursor hidden) — we draw an on-screen UI cross to indicate pointer
