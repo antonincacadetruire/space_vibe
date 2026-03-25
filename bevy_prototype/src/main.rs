@@ -11,13 +11,14 @@ use systems::core::exit::toggle_menu_system;
 use systems::core::fullscreen::toggle_fullscreen_system;
 use systems::ui::hud::{ui_update_system, cursor_follow_system};
 use systems::core::collision::asteroid_collision_system;
-use systems::core::movement::{asteroid_movement_system, player_movement_system};
+use systems::core::movement::{asteroid_movement_system, player_movement_system, desert_terrain_death_system};
 use systems::scenes::space_scene::{follow_sky_dome_system, update_ring_lod_system, update_ring_orbit_system};
 use systems::scenes::scene_manager::{spawn_active_scene_system, despawn_scene_entities};
 use systems::ui::menu::{button_appearance_system, menu_ui_system, menu_button_system, sensitivity_button_system, sensitivity_text_system, key_capture_system};
 use systems::ui::start_menu::{
     setup_start_menu, teardown_start_menu,
     start_menu_button_system, start_menu_button_appearance_system,
+    start_menu_carousel_system,
     enter_playing, spawn_timer_ui, despawn_timer_ui, update_timer,
     danger_hud_system,
 };
@@ -26,9 +27,17 @@ use systems::ui::death_screen::{
     death_screen_button_system, death_screen_button_appearance_system,
 };
 use systems::ui::minimap::{spawn_minimap_ui, despawn_minimap_ui, update_minimap_system};
+use systems::ui::copilot_chat::{
+    LlmChatState,
+    setup_llm_chat_ui, teardown_llm_chat_ui,
+    llm_chat_toggle_system, llm_chat_input_system,
+    llm_chat_poll_system, llm_chat_save_system,
+};
 use systems::enemies::missiles::{missile_spawner_system, missile_movement_system, despawn_missiles};
 use systems::enemies::alien_ships::{alien_ship_spawner_system, alien_ship_movement_system, alien_ship_shoot_system, despawn_alien_ships};
 use systems::enemies::combat::{shoot_laser_system, laser_movement_system, portal_animation_system, explosion_animation_system, health_pip_update_system, despawn_effects};
+use systems::core::player_ship::spawn_player_ship_system;
+use systems::data_loader::load_catalogs;
 
 const SHUTTLE_SPEED: f32 = 20_000.0;
 
@@ -54,20 +63,26 @@ fn main() {
         .insert_resource(KillCount::default())
         .insert_resource(FreeLook::default())
         .insert_resource(MissileSpawnTimer(Timer::from_seconds(18.0, TimerMode::Repeating)))
-        .insert_resource(AlienSpawnTimer(Timer::from_seconds(30.0, TimerMode::Repeating)))
         .insert_resource(DeathCause::default())
+        .insert_resource(ShipSkin::default())
+        .insert_resource(ZoneBoundary::default())
+        .insert_resource(CameraMode::default())
+        .insert_resource(CameraArmOffset::default())
+        .insert_resource(LlmChatState::default())
         // ── Startup ──────────────────────────────────────────────────────────
-        .add_systems(Startup, setup::setup)
+        .add_systems(Startup, (setup::setup, load_catalogs))
         // ── State enter/exit hooks ───────────────────────────────────────────
         .add_systems(OnEnter(GameState::StartMenu), setup_start_menu)
         .add_systems(OnExit(GameState::StartMenu), teardown_start_menu)
         .add_systems(OnEnter(GameState::Playing), (
             spawn_active_scene_system,
             enter_playing.after(spawn_active_scene_system),
+            spawn_player_ship_system.after(spawn_active_scene_system),
             spawn_timer_ui,
             spawn_minimap_ui,
+            setup_llm_chat_ui,
         ))
-        .add_systems(OnExit(GameState::Playing), (despawn_timer_ui, despawn_minimap_ui, despawn_missiles, despawn_alien_ships, despawn_effects, despawn_scene_entities))
+        .add_systems(OnExit(GameState::Playing), (despawn_timer_ui, despawn_minimap_ui, teardown_llm_chat_ui, despawn_missiles, despawn_alien_ships, despawn_effects, despawn_scene_entities))
         .add_systems(OnEnter(GameState::Dead), setup_death_screen)
         .add_systems(OnExit(GameState::Dead), (teardown_death_screen, despawn_missiles, despawn_alien_ships, despawn_effects, despawn_scene_entities))
         // ── Update: always ────────────────────────────────────────────────────
@@ -78,6 +93,7 @@ fn main() {
             (
                 start_menu_button_appearance_system,
                 start_menu_button_system.after(start_menu_button_appearance_system),
+                start_menu_carousel_system.after(start_menu_button_system),
             )
                 .run_if(in_state(GameState::StartMenu)),
         )
@@ -85,10 +101,13 @@ fn main() {
         .add_systems(
             Update,
             (
-                mouse_look_system,
+                systems::core::camera_view::undo_arm_offset_system,
+                mouse_look_system.after(systems::core::camera_view::undo_arm_offset_system),
                 toggle_menu_system,
+                systems::core::camera_view::camera_toggle_system,
                 player_movement_system.after(mouse_look_system),
-                record_camera_position_system.after(player_movement_system),
+                systems::core::camera_view::apply_arm_offset_system.after(player_movement_system),
+                record_camera_position_system.after(systems::core::camera_view::apply_arm_offset_system),
                 ui_update_system.after(player_movement_system),
                 cursor_follow_system.after(ui_update_system),
                 update_timer.after(player_movement_system),
@@ -102,6 +121,17 @@ fn main() {
             )
                 .run_if(in_state(GameState::Playing)),
         )
+        // ── Update: Playing state (batch A2 – Copilot chat) ─────────────────
+        .add_systems(
+            Update,
+            (
+                llm_chat_toggle_system,
+                llm_chat_input_system.after(llm_chat_toggle_system),
+                llm_chat_poll_system.after(llm_chat_input_system),
+                llm_chat_save_system.after(llm_chat_poll_system),
+            )
+                .run_if(in_state(GameState::Playing)),
+        )
         // ── Update: Playing state (batch B – world / missiles / scene) ───────
         .add_systems(
             Update,
@@ -111,6 +141,7 @@ fn main() {
                 missile_spawner_system.after(player_movement_system),
                 missile_movement_system.after(missile_spawner_system),
                 danger_hud_system.after(missile_movement_system),
+                desert_terrain_death_system.after(player_movement_system),
                 alien_ship_spawner_system,
                 alien_ship_movement_system.after(alien_ship_spawner_system),
                 alien_ship_shoot_system.after(alien_ship_movement_system),

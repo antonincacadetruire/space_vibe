@@ -21,8 +21,8 @@ pub fn resolve_ui_font_path() -> &'static str {
 
 pub fn setup(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    _meshes: ResMut<Assets<Mesh>>,
+    _materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
     asset_server: Res<AssetServer>,

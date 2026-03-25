@@ -10,49 +10,81 @@ graph TB
   GS_PL[GameState: Playing]
   GS_DE[GameState: Dead]
 
-  SM[Start Menu - Scene Selection + Per-Scene Best Times]
+  JSON_MAPS[data/maps/*.json - MapDef: id, label, boundary_radius, SVG preview]
+  JSON_SKINS[data/skins/*.json - SkinDef: id, label, SVG preview]
+  JSON_ENEMIES[data/enemies/*.json - EnemyDef: colors, speed, health, spawn rules]
+  JSON_LLM[data/llm_config.json - api_url, api_key, model, system_prompt]
+  DataLoader[load_catalogs Startup - MapCatalog + SkinCatalog + EnemyCatalog + LlmConfig]
+  SVGRast[svg_to_image - resvg rasterisation to Bevy Image handle]
+
+  SM[Start Menu - 880px panel - Skin/Map carousels with SVG previews + best times]
   DS[Death Screen - Score + Kill Count + PlayAgain + MainMenu]
   TI[Timer + Kill Count HUD - top-right]
   MM[Minimap - bottom-right - enemy radar]
+  CHAT[Copilot Chat - F2 overlay - LLM generates map/skin/enemy JSON]
 
   ActiveScene[ActiveScene Resource - SpaceAsteroids / IceCaves / DesertPlanet]
   KillCount[KillCount Resource - reset on enter Playing]
   SL[SceneLeaderboard - top-3 per scene persisted to .dat files]
+  ZB[ZoneBoundary Resource - boundary_radius from MapCatalog]
+  ShipSkin[ShipSkin Resource - WarPlane / Banana / Mosquito]
+  CamMode[CameraMode Resource - FirstPerson / ThirdPerson toggle F5]
+  CamArm[CameraArmOffset - spring-arm for ThirdPerson view]
+  TerrainData[DesertTerrainData - floor_y + mountain kill-spheres]
 
-  SceneMgr[spawn_active_scene_system]
-  SS[Space Asteroids Scene - Saturn ring belt]
-  IC[Ice Caves Scene - giant asteroid interior]
-  DP[Desert Planet Scene - horizon dunes mountains]
+  SceneMgr[spawn_active_scene_system - reads MapCatalog for boundary]
+  SS[Space Asteroids Scene - Saturn ring belt - 400k boundary]
+  IC[Ice Caves Scene - giant asteroid interior - 160k boundary]
+  DP[Desert Planet Scene - horizon dunes mountains rock spires - 280k boundary]
   SceneClean[despawn_scene_entities - SceneEntity marker]
+
+  ShipModel[spawn_player_ship_system - WarPlane / Banana / Mosquito 3D mesh]
+  CamView[camera_toggle_system - F5 show/hide ship model + arm offset]
 
   SB[Camera-Following Starfield + Nebula Dome]
   SP[Saturn + Atmosphere]
   LOD[Distance-Based Asteroid LOD]
   ML[Mouse Look]
-  PM[Player Movement]
+  PM[Player Movement + zone boundary reflection 70% damping]
   AC[Asteroid Collision]
   AM[Asteroid Movement]
+  TD[Terrain Death - floor + mountain kill-spheres]
   UI[Menu UI]
   R[Main Camera / Player View]
   BP[Bloom + Cinematic Lighting]
-  AL[Alien Ships - patrol + shoot]
+  AL[Alien Ships - patrol + shoot - stats from EnemyCatalog]
   MS[Homing Missiles - proportional nav]
   CB[Combat - lasers + explosions + health pips]
   LB[Leaderboard submit on death]
 
+  Startup --> DataLoader
+  JSON_MAPS --> DataLoader
+  JSON_SKINS --> DataLoader
+  JSON_ENEMIES --> DataLoader
+  JSON_LLM --> DataLoader
+  DataLoader --> SVGRast
+  SVGRast --> SM
+  DataLoader --> SceneMgr
+  DataLoader --> AL
+
   Startup --> R
 
   GS_SM --> SM
-  SM -- Scene chosen --> ActiveScene
+  SM -- Map chosen --> ActiveScene
+  SM -- Skin chosen --> ShipSkin
   ActiveScene --> SceneMgr
   SM -- Play clicked --> GS_PL
   GS_PL --> SceneMgr
   SceneMgr -- SpaceAsteroids --> SS
   SceneMgr -- IceCaves --> IC
   SceneMgr -- DesertPlanet --> DP
+  SceneMgr --> ZB
+  DP --> TerrainData
+  GS_PL --> ShipModel
   GS_PL --> TI
   GS_PL --> MM
-  GS_PL -- collision / missile hit --> GS_DE
+  GS_PL --> CHAT
+  GS_PL -- collision / missile / terrain --> GS_DE
   GS_DE --> DS
   GS_DE --> LB
   LB --> SL
@@ -63,7 +95,20 @@ graph TB
   M --> ML
   ML --> R
   K --> PM
+  PM --> ZB
+  ZB -- boundary bounce --> PM
   PM --> R
+  TerrainData --> TD
+  TD -- DeathCause::Terrain --> GS_DE
+
+  ShipSkin --> ShipModel
+  ShipModel --> CamView
+  CamMode --> CamView
+  CamArm --> CamView
+
+  CHAT -- Save JSON --> JSON_MAPS
+  CHAT -- Save JSON --> JSON_SKINS
+  CHAT -- Save JSON --> JSON_ENEMIES
 
   SS --> SB
   SS --> SP

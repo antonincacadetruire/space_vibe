@@ -113,6 +113,7 @@ pub struct SpawnTransform {
     pub pitch: f32,
 }
 
+#[allow(dead_code)]
 #[derive(Resource)]
 pub struct AsteroidSpawnTimer(pub Timer);
 
@@ -203,4 +204,74 @@ pub enum DeathCause {
     #[default]
     Asteroid,
     Missile,
+    Terrain,
+}
+
+// ── Selectable ship appearance (future skins system) ─────────────────────────
+#[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
+pub enum ShipSkin {
+    #[default]
+    WarPlane,
+    Banana,
+    Mosquito,
+}
+
+// ── Maximum distance the player may travel from the scene origin ──────────────
+#[derive(Resource)]
+pub struct ZoneBoundary(pub f32);
+
+impl Default for ZoneBoundary {
+    fn default() -> Self {
+        ZoneBoundary(100_000.0)
+    }
+}
+
+// ── Camera view mode (first-person or third-person) ───────────────────────────
+#[derive(Resource, Debug, Clone, PartialEq, Eq)]
+pub enum CameraMode {
+    FirstPerson,
+    ThirdPerson,
+}
+
+impl Default for CameraMode {
+    fn default() -> Self { CameraMode::ThirdPerson }
+}
+
+/// World-space offset currently applied to the camera for the third-person
+/// spring-arm effect. Must be undone before movement and reapplied after.
+#[derive(Resource, Default)]
+pub struct CameraArmOffset(pub Vec3);
+
+#[allow(dead_code)]
+impl ShipSkin {
+    pub fn label(&self) -> &'static str {
+        match self {
+            ShipSkin::WarPlane => "War Plane",
+            ShipSkin::Banana   => "Banana",
+            ShipSkin::Mosquito => "Mosquito",
+        }
+    }
+
+    pub fn all() -> &'static [ShipSkin] {
+        &[ShipSkin::WarPlane, ShipSkin::Banana, ShipSkin::Mosquito]
+    }
+
+    pub fn id(&self) -> &'static str {
+        match self {
+            ShipSkin::WarPlane => "war_plane",
+            ShipSkin::Banana   => "banana",
+            ShipSkin::Mosquito => "mosquito",
+        }
+    }
+}
+
+// ── Desert terrain kill data ──────────────────────────────────────────────────
+/// Populated by `spawn_desert_planet_scene'; queried by `desert_terrain_death_system`.
+/// Only valid while the desert map is active.
+#[derive(Resource, Default)]
+pub struct DesertTerrainData {
+    /// Y coordinate of the sand surface (player dies when below this).
+    pub floor_y: f32,
+    /// List of (centre, kill_radius) for each mountain peak.
+    pub mountain_spheres: Vec<(Vec3, f32)>,
 }

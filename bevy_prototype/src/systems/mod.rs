@@ -6,4 +6,6 @@ pub mod enemies;
 pub mod scenes;
 // ── UI (menus, HUD, minimap) ───────────────────────────────────────────────
 pub mod ui;
+// ── Data loading (JSON map/skin catalog) ──────────────────────────────────
+pub mod data_loader;
 

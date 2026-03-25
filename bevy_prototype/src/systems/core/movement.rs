@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::components::{Asteroid, BeltAsteroid, MainCamera, Radius, Velocity, AngularVelocity};
-use crate::resources::{DeathCause, Throttle, TimePaused, VelocityUpdates, MenuState, Keybindings, PrevCameraPosition, GameState, GameTimer, FreeLook};
+use crate::resources::{DeathCause, DesertTerrainData, Throttle, TimePaused, VelocityUpdates, MenuState, Keybindings, PrevCameraPosition, GameState, GameTimer, FreeLook, ZoneBoundary};
 
 pub fn player_movement_system(
     time: Res<Time>,
@@ -12,6 +12,7 @@ pub fn player_movement_system(
     keyb: Res<Keybindings>,
     keyboard: Res<Input<KeyCode>>,
     free_look: Res<FreeLook>,
+    boundary: Res<ZoneBoundary>,
 ) {
     // Toggle pause via keybinding
     if keyboard.just_pressed(keyb.toggle_pause) {
@@ -53,6 +54,15 @@ pub fn player_movement_system(
 
     let movement = forward * throttle.0 * dt + Vec3::Y * crate::SHUTTLE_SPEED * vertical * dt;
     transform.translation += movement;
+
+    // Boundary: push the player back inward but preserve speed (feels natural).
+    let dist = transform.translation.length();
+    if dist > boundary.0 {
+        // Clamp position to sphere surface
+        transform.translation = transform.translation / dist * boundary.0;
+        // Reflect the throttle so the player bounces; also bleed 30 % energy.
+        throttle.0 = -(throttle.0 * 0.7);
+    }
 }
 
 pub fn record_camera_position_system(
@@ -125,6 +135,40 @@ pub fn asteroid_movement_system(
             commands.entity(entity).despawn_recursive();
             *death_cause = DeathCause::Asteroid;
             next_state.set(GameState::Dead);
+        }
+    }
+}
+
+/// Kills the player if they fly into desert terrain (floor or mountain peaks).
+/// Only active when the desert map is loaded (resource present).
+pub fn desert_terrain_death_system(
+    terrain: Option<Res<DesertTerrainData>>,
+    camera_q: Query<&Transform, With<crate::components::MainCamera>>,
+    paused: Res<TimePaused>,
+    mut death_cause: ResMut<DeathCause>,
+    mut next_state: ResMut<NextState<GameState>>,
+    game_timer: Res<GameTimer>,
+) {
+    if paused.0 { return; }
+    let Some(terrain) = terrain else { return };
+    let Ok(cam) = camera_q.get_single() else { return };
+    let pos = cam.translation;
+
+    // Floor death
+    if pos.y < terrain.floor_y {
+        info!("Player hit the desert floor! Score: {:.1}s", game_timer.0);
+        *death_cause = DeathCause::Terrain;
+        next_state.set(GameState::Dead);
+        return;
+    }
+
+    // Mountain death — check against stored kill spheres
+    for &(center, radius) in &terrain.mountain_spheres {
+        if pos.distance(center) < radius {
+            info!("Player flew into a mountain! Score: {:.1}s", game_timer.0);
+            *death_cause = DeathCause::Terrain;
+            next_state.set(GameState::Dead);
+            return;
         }
     }
 }

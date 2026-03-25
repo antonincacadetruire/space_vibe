@@ -1,0 +1,6 @@
+{
+  "id": "banana",
+  "label": "Banana",
+  "description": "A very aerodynamic banana. Don't ask why it works.",
+  "preview_svg": "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 80'><rect width='120' height='80' fill='#050c10'/><g transform='translate(60,40)'><path d='M0,-28 C18,-28 30,-15 30,0 C30,15 18,25 0,28 C-12,25 -18,12 -14,0 C-18,-14 -12,-26 0,-28 Z' fill='#f0d020' stroke='#b08010' stroke-width='1.5'/><path d='M0,-28 C18,-28 30,-15 30,0' fill='none' stroke='#d4b418' stroke-width='2.5' opacity='0.6'/><ellipse cx='4' cy='-24' rx='3' ry='2' fill='#60400a' transform='rotate(-15,4,-24)'/><path d='M-6,0 C-4,-8 4,-8 6,0 C4,8 -4,8 -6,0 Z' fill='#d4b010' opacity='0.5'/></g></svg>"
+}

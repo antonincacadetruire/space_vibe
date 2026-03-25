@@ -2,8 +2,9 @@ use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, Window, CursorGrabMode, CursorIcon};
 
 use crate::components::*;
-use crate::resources::{ActiveScene, DeathCause, GameState, GameTimer, KillCount, SceneKind, SceneLeaderboard, SpawnTransform, MouseLook, Throttle, TimePaused, PrevCameraPosition, MissileSpawnTimer, AlienSpawnTimer};
+use crate::resources::{ActiveScene, DeathCause, GameState, GameTimer, KillCount, SceneKind, SceneLeaderboard, SpawnTransform, MouseLook, Throttle, TimePaused, PrevCameraPosition, MissileSpawnTimer, AlienSpawnTimer, ShipSkin};
 use crate::setup::resolve_ui_font_path;
+use crate::systems::data_loader::{CarouselState, MapCatalog, MapCatalogImages, SkinCatalog, SkinCatalogImages};
 
 // ── Shared style helpers (matching existing menu palette) ────────────────────
 fn hud_text_color() -> Color { Color::rgb(0.18, 0.95, 0.98) }
@@ -24,6 +25,7 @@ fn btn_style() -> Style {
     }
 }
 
+#[allow(dead_code)]
 fn wide_btn_style() -> Style {
     Style {
         width: Val::Px(580.0),
@@ -43,6 +45,11 @@ pub fn setup_start_menu(
     asset_server: Res<AssetServer>,
     leaderboard: Res<SceneLeaderboard>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
+    map_catalog: Res<MapCatalog>,
+    skin_catalog: Res<SkinCatalog>,
+    carousel_state: Res<CarouselState>,
+    map_images: Res<MapCatalogImages>,
+    skin_images: Res<SkinCatalogImages>,
 ) {
     if let Ok(mut window) = windows.get_single_mut() {
         window.cursor.visible = true;
@@ -51,29 +58,61 @@ pub fn setup_start_menu(
     }
 
     let font = asset_server.load(resolve_ui_font_path());
-    let label = TextStyle { font: font.clone(), font_size: 22.0, color: hud_text_color() };
 
-    let fmt = |v: f32| {
+    let title_style   = TextStyle { font: font.clone(), font_size: 72.0, color: hud_text_color() };
+    let sub_style     = TextStyle { font: font.clone(), font_size: 20.0, color: Color::rgb(0.45, 0.80, 0.85) };
+    let section_style = TextStyle { font: font.clone(), font_size: 14.0, color: Color::rgb(0.35, 0.65, 0.68) };
+    let label_style   = TextStyle { font: font.clone(), font_size: 28.0, color: hud_text_color() };
+    let desc_style    = TextStyle { font: font.clone(), font_size: 16.0, color: Color::rgb(0.60, 0.80, 0.82) };
+    let score_style   = TextStyle { font: font.clone(), font_size: 15.0, color: Color::rgb(1.00, 0.75, 0.25) };
+
+    let fmt_time = |v: f32| {
         let mins = (v / 60.0) as u32;
         let secs = (v % 60.0) as u32;
         let tenths = ((v % 1.0) * 10.0) as u32;
         format!("{:02}:{:02}.{}", mins, secs, tenths)
     };
 
-    // Helper: format top scores for a scene into 1–3 short strings.
-    let scene_scores = |scene: &SceneKind| -> Vec<String> {
-        leaderboard.scores(scene).iter().enumerate().map(|(i, &s)| {
-            let medal = match i { 0 => "#1", 1 => "#2", _ => "#3" };
-            format!("{} {}", medal, fmt(s))
-        }).collect()
+    // ── Resolve initial catalog data ─────────────────────────────────────────
+    let skin_idx = carousel_state.skin_idx.min(skin_catalog.skins.len().saturating_sub(1));
+    let map_idx  = carousel_state.map_idx .min(map_catalog.maps.len().saturating_sub(1));
+
+    let (skin_label, skin_desc) = skin_catalog.skins.get(skin_idx)
+        .map(|s| (s.label.clone(), s.description.clone()))
+        .unwrap_or_else(|| ("War Plane".into(), "".into()));
+
+    let active_map = map_catalog.maps.get(map_idx);
+    let (map_label, map_desc, map_scene) = active_map
+        .map(|m| {
+            let scene = match m.id.as_str() {
+                "ice_caves"     => SceneKind::IceCaves,
+                "desert_planet" => SceneKind::DesertPlanet,
+                _               => SceneKind::SpaceAsteroids,
+            };
+            (m.label.clone(), m.description.clone(), scene)
+        })
+        .unwrap_or_else(|| ("Asteroid Field".into(), "".into(), SceneKind::SpaceAsteroids));
+
+    let scores_text = {
+        let scores = leaderboard.scores(&map_scene);
+        if scores.is_empty() {
+            "No records yet".into()
+        } else {
+            scores.iter().enumerate()
+                .map(|(i, &s)| format!("{}  {}", ["#1", "#2", "#3"][i], fmt_time(s)))
+                .collect::<Vec<_>>()
+                .join("   ")
+        }
     };
 
-    let scenes: [(SceneKind, &str, Color); 3] = [
-        (SceneKind::SpaceAsteroids, "Asteroid Field",  Color::rgb(0.15, 0.90, 0.98)),
-        (SceneKind::IceCaves,       "Ice Caves",        Color::rgb(0.50, 0.80, 1.00)),
-        (SceneKind::DesertPlanet,   "Desert Planet",    Color::rgb(1.00, 0.60, 0.15)),
-    ];
+    let skin_img_handle = skin_images.handles.get(skin_idx)
+        .cloned()
+        .unwrap_or_default();
+    let map_img_handle = map_images.handles.get(map_idx)
+        .cloned()
+        .unwrap_or_default();
 
+    // ── Root overlay ──────────────────────────────────────────────────────────
     commands
         .spawn((
             NodeBundle {
@@ -85,69 +124,178 @@ pub fn setup_start_menu(
                     align_items: AlignItems::Center,
                     ..default()
                 },
-                background_color: Color::rgba(0.0, 0.0, 0.0, 0.72).into(),
+                background_color: Color::rgba(0.0, 0.0, 0.0, 0.78).into(),
                 ..default()
             },
             StartMenuRoot,
         ))
         .with_children(|root| {
+            // ── Main panel ────────────────────────────────────────────────────
             root.spawn(NodeBundle {
                 style: Style {
-                    width: Val::Px(640.0),
+                    width: Val::Px(880.0),
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
-                    row_gap: Val::Px(10.0),
-                    padding: UiRect::all(Val::Px(28.0)),
+                    row_gap: Val::Px(14.0),
+                    padding: UiRect::all(Val::Px(36.0)),
                     ..default()
                 },
                 background_color: panel_background().into(),
                 ..default()
             })
             .with_children(|panel| {
-                // Title
-                panel.spawn(TextBundle::from_section(
-                    "SPACE VIBE",
-                    TextStyle { font: font.clone(), font_size: 56.0, color: hud_text_color() },
-                ));
-                panel.spawn(TextBundle::from_section(
-                    "Choose your mission",
-                    TextStyle { font: font.clone(), font_size: 18.0, color: Color::rgb(0.45, 0.80, 0.85) },
-                ));
 
-                // One scene-select button per scene
-                for (scene, name, accent) in &scenes {
-                    let scores = scene_scores(scene);
-                    // Build score summary string
-                    let score_summary = if scores.is_empty() {
-                        "No runs yet".to_string()
-                    } else {
-                        scores.join("  |  ")
-                    };
+                // ── Title ─────────────────────────────────────────────────────
+                panel.spawn(TextBundle::from_section("SPACE VIBE", title_style.clone()));
+                panel.spawn(TextBundle::from_section("Choose your mission", sub_style.clone()));
 
-                    panel.spawn((
+                // Divider
+                panel.spawn(NodeBundle {
+                    style: Style { width: Val::Px(800.0), height: Val::Px(1.0), margin: UiRect::vertical(Val::Px(6.0)), ..default() },
+                    background_color: Color::rgba(0.18, 0.95, 0.98, 0.15).into(),
+                    ..default()
+                });
+
+                // ── SKIN section label ────────────────────────────────────────
+                panel.spawn(NodeBundle {
+                    style: Style { width: Val::Px(800.0), justify_content: JustifyContent::FlexStart, ..default() },
+                    ..default()
+                }).with_children(|r| {
+                    r.spawn(TextBundle::from_section("SKIN", section_style.clone()));
+                });
+
+                // Skin card: [preview img | label + description]
+                panel.spawn(NodeBundle {
+                    style: Style {
+                        width: Val::Px(800.0),
+                        height: Val::Px(148.0),
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(20.0),
+                        padding: UiRect::all(Val::Px(12.0)),
+                        ..default()
+                    },
+                    background_color: Color::rgba(0.04, 0.10, 0.12, 0.7).into(),
+                    ..default()
+                })
+                .with_children(|card| {
+                    // Preview image
+                    card.spawn((
+                        ImageBundle {
+                            style: Style { width: Val::Px(128.0), height: Val::Px(128.0), flex_shrink: 0.0, ..default() },
+                            image: UiImage::new(skin_img_handle),
+                            ..default()
+                        },
+                        SkinPreviewImage,
+                    ));
+                    // Text column
+                    card.spawn(NodeBundle {
+                        style: Style { flex_direction: FlexDirection::Column, row_gap: Val::Px(6.0), ..default() },
+                        ..default()
+                    }).with_children(|col| {
+                        col.spawn(TextBundle::from_section(skin_label.clone(), label_style.clone())).insert(SkinLabel);
+                        col.spawn(TextBundle::from_section(skin_desc,  desc_style.clone())).insert(SkinDescLabel);
+                    });
+                });
+
+                // Skin carousel controls
+                spawn_carousel_row(panel, &font, SkinLeftButton, SkinRightButton);
+
+                // Divider
+                panel.spawn(NodeBundle {
+                    style: Style { width: Val::Px(800.0), height: Val::Px(1.0), margin: UiRect::vertical(Val::Px(6.0)), ..default() },
+                    background_color: Color::rgba(0.18, 0.95, 0.98, 0.15).into(),
+                    ..default()
+                });
+
+                // ── MAP section label ─────────────────────────────────────────
+                panel.spawn(NodeBundle {
+                    style: Style { width: Val::Px(800.0), justify_content: JustifyContent::FlexStart, ..default() },
+                    ..default()
+                }).with_children(|r| {
+                    r.spawn(TextBundle::from_section("MAP", section_style.clone()));
+                });
+
+                // Map card: [preview img | label + description + scores]
+                panel.spawn(NodeBundle {
+                    style: Style {
+                        width: Val::Px(800.0),
+                        height: Val::Px(148.0),
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(20.0),
+                        padding: UiRect::all(Val::Px(12.0)),
+                        ..default()
+                    },
+                    background_color: Color::rgba(0.04, 0.10, 0.12, 0.7).into(),
+                    ..default()
+                })
+                .with_children(|card| {
+                    // Preview image
+                    card.spawn((
+                        ImageBundle {
+                            style: Style { width: Val::Px(128.0), height: Val::Px(128.0), flex_shrink: 0.0, ..default() },
+                            image: UiImage::new(map_img_handle),
+                            ..default()
+                        },
+                        MapPreviewImage,
+                    ));
+                    // Text column
+                    card.spawn(NodeBundle {
+                        style: Style { flex_direction: FlexDirection::Column, row_gap: Val::Px(6.0), ..default() },
+                        ..default()
+                    }).with_children(|col| {
+                        col.spawn(TextBundle::from_section(map_label.clone(), label_style.clone())).insert(MapLabel);
+                        col.spawn(TextBundle::from_section(map_desc,   desc_style.clone())).insert(MapDescLabel);
+                        col.spawn(TextBundle::from_section(scores_text, score_style.clone())).insert(MapScoresLabel);
+                    });
+                });
+
+                // Map carousel controls
+                spawn_carousel_row(panel, &font, MapLeftButton, MapRightButton);
+
+                // Divider
+                panel.spawn(NodeBundle {
+                    style: Style { width: Val::Px(800.0), height: Val::Px(1.0), margin: UiRect::vertical(Val::Px(8.0)), ..default() },
+                    background_color: Color::rgba(0.18, 0.95, 0.98, 0.15).into(),
+                    ..default()
+                });
+
+                // ── Action buttons ───────────────────────────────────────────
+                panel.spawn(NodeBundle {
+                    style: Style {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(24.0),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    ..default()
+                })
+                .with_children(|row| {
+                    // PLAY
+                    row.spawn((
                         ButtonBundle {
-                            style: wide_btn_style(),
+                            style: Style {
+                                width: Val::Px(360.0),
+                                height: Val::Px(80.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
                             background_color: btn_normal().into(),
                             ..default()
                         },
-                        // We can't box-downcast in Bevy, so use a scene-tag component:
-                        SceneSelectButton { scene: scene.clone() },
+                        PlayButton,
                     ))
-                    .with_children(|btn| {
-                        btn.spawn(TextBundle::from_section(
-                            *name,
-                            TextStyle { font: font.clone(), font_size: 26.0, color: *accent },
-                        ));
-                        btn.spawn(TextBundle::from_section(
-                            score_summary,
-                            TextStyle { font: font.clone(), font_size: 14.0, color: Color::rgb(0.55, 0.75, 0.75) },
+                    .with_children(|b| {
+                        b.spawn(TextBundle::from_section(
+                            "PLAY",
+                            TextStyle { font: font.clone(), font_size: 34.0, color: hud_text_color() },
                         ));
                     });
-                }
 
-                // Exit button
-                panel
-                    .spawn((
+                    // EXIT
+                    row.spawn((
                         ButtonBundle {
                             style: btn_style(),
                             background_color: btn_normal().into(),
@@ -156,10 +304,50 @@ pub fn setup_start_menu(
                         QuitButton,
                     ))
                     .with_children(|b| {
-                        b.spawn(TextBundle::from_section("Exit", label.clone()));
+                        b.spawn(TextBundle::from_section(
+                            "Exit",
+                            TextStyle { font: font.clone(), font_size: 22.0, color: hud_text_color() },
+                        ));
                     });
+                });
             });
         });
+}
+
+/// Spawns a `< ... >` carousel row.  The type params let us reuse this for
+/// both the skin and map carousels without a runtime flag.
+fn spawn_carousel_row<L, R>(
+    parent: &mut ChildBuilder,
+    font: &Handle<Font>,
+    _left_marker: L,
+    _right_marker: R,
+) where
+    L: Component + Default,
+    R: Component + Default,
+{
+    let arrow_style = TextStyle { font: font.clone(), font_size: 34.0, color: Color::rgb(0.18, 0.95, 0.98) };
+    parent.spawn(NodeBundle {
+        style: Style {
+            width: Val::Px(800.0),
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        ..default()
+    })
+    .with_children(|row| {
+        row.spawn((
+            ButtonBundle { style: btn_style(), background_color: btn_normal().into(), ..default() },
+            L::default(),
+        ))
+        .with_children(|b| { b.spawn(TextBundle::from_section("<", arrow_style.clone())); });
+
+        row.spawn((
+            ButtonBundle { style: btn_style(), background_color: btn_normal().into(), ..default() },
+            R::default(),
+        ))
+        .with_children(|b| { b.spawn(TextBundle::from_section(">", arrow_style.clone())); });
+    });
 }
 
 // ── OnExit(GameState::StartMenu) ──────────────────────────────────────────────
@@ -300,39 +488,149 @@ pub fn update_timer(
 
 // ── Update – button appearance (start menu only) ─────────────────────────────
 pub fn start_menu_button_appearance_system(
-    mut q: Query<
-        (&Interaction, &mut BackgroundColor, Option<&SceneSelectButton>, Option<&QuitButton>),
-        (Changed<Interaction>, With<Button>),
-    >,
+    mut q: Query<(&Interaction, &mut BackgroundColor), (Changed<Interaction>, With<Button>)>,
 ) {
-    for (interaction, mut bg, scene_btn, quit) in q.iter_mut() {
-        if scene_btn.is_some() || quit.is_some() {
-            bg.0 = match interaction {
-                Interaction::Pressed => btn_pressed(),
-                Interaction::Hovered => btn_hovered(),
-                Interaction::None    => btn_normal(),
-            };
-        }
+    for (interaction, mut bg) in q.iter_mut() {
+        bg.0 = match interaction {
+            Interaction::Pressed => btn_pressed(),
+            Interaction::Hovered => btn_hovered(),
+            Interaction::None    => btn_normal(),
+        };
     }
 }
 
 // ── Update – button action (start menu only) ─────────────────────────────────
 pub fn start_menu_button_system(
     mut q: Query<
-        (&Interaction, Option<&SceneSelectButton>, Option<&QuitButton>),
+        (&Interaction, Option<&QuitButton>),
         (Changed<Interaction>, With<Button>),
     >,
-    mut next_state: ResMut<NextState<GameState>>,
-    mut active_scene: ResMut<ActiveScene>,
+    mut _next_state: ResMut<NextState<GameState>>,
+    mut _active_scene: ResMut<ActiveScene>,
 ) {
-    for (interaction, scene_btn, quit) in q.iter_mut() {
+    for (interaction, quit) in q.iter_mut() {
         if *interaction == Interaction::Pressed {
-            if let Some(SceneSelectButton { scene }) = scene_btn {
-                active_scene.0 = scene.clone();
-                next_state.set(GameState::Playing);
-            } else if quit.is_some() {
+            if quit.is_some() {
                 std::process::exit(0);
             }
+        }
+    }
+}
+
+// New: handle carousel buttons and the Play button
+pub fn start_menu_carousel_system(
+    mut q: Query<(
+        &Interaction,
+        Option<&SkinLeftButton>, Option<&SkinRightButton>,
+        Option<&MapLeftButton>,  Option<&MapRightButton>,
+        Option<&PlayButton>,
+    ), (Changed<Interaction>, With<Button>)>,
+    mut ship_skin: ResMut<ShipSkin>,
+    mut active_scene: ResMut<ActiveScene>,
+    mut carousel_state: ResMut<CarouselState>,
+    skin_catalog: Res<SkinCatalog>,
+    map_catalog: Res<MapCatalog>,
+    skin_images: Res<SkinCatalogImages>,
+    map_images: Res<MapCatalogImages>,
+    leaderboard: Res<SceneLeaderboard>,
+    mut text_q: ParamSet<(
+        Query<&mut Text, With<SkinLabel>>,
+        Query<&mut Text, With<SkinDescLabel>>,
+        Query<&mut Text, With<MapLabel>>,
+        Query<&mut Text, With<MapDescLabel>>,
+        Query<&mut Text, With<MapScoresLabel>>,
+    )>,
+    mut img_q: ParamSet<(
+        Query<&mut UiImage, With<SkinPreviewImage>>,
+        Query<&mut UiImage, With<MapPreviewImage>>,
+    )>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    let skin_count = skin_catalog.skins.len().max(1);
+    let map_count  = map_catalog.maps.len().max(1);
+
+    let fmt_time = |v: f32| {
+        let mins = (v / 60.0) as u32;
+        let secs = (v % 60.0) as u32;
+        let tenths = ((v % 1.0) * 10.0) as u32;
+        format!("{:02}:{:02}.{}", mins, secs, tenths)
+    };
+
+    let mut skin_changed = false;
+    let mut map_changed  = false;
+
+    for (interaction, skin_l, skin_r, map_l, map_r, play) in q.iter_mut() {
+        if *interaction != Interaction::Pressed { continue; }
+
+        if skin_l.is_some() {
+            carousel_state.skin_idx = (carousel_state.skin_idx + skin_count - 1) % skin_count;
+            skin_changed = true;
+        }
+        if skin_r.is_some() {
+            carousel_state.skin_idx = (carousel_state.skin_idx + 1) % skin_count;
+            skin_changed = true;
+        }
+        if map_l.is_some() {
+            carousel_state.map_idx = (carousel_state.map_idx + map_count - 1) % map_count;
+            map_changed = true;
+        }
+        if map_r.is_some() {
+            carousel_state.map_idx = (carousel_state.map_idx + 1) % map_count;
+            map_changed = true;
+        }
+        if play.is_some() {
+            next_state.set(GameState::Playing);
+        }
+    }
+
+    if skin_changed {
+        let idx = carousel_state.skin_idx;
+        *ship_skin = match skin_catalog.skins.get(idx).map(|s| s.id.as_str()) {
+            Some("banana")   => ShipSkin::Banana,
+            Some("mosquito") => ShipSkin::Mosquito,
+            _                => ShipSkin::WarPlane,
+        };
+        if let Some(s) = skin_catalog.skins.get(idx) {
+            let label = s.label.clone();
+            let desc  = s.description.clone();
+            for mut t in text_q.p0().iter_mut() { t.sections[0].value = label.clone(); }
+            for mut t in text_q.p1().iter_mut() { t.sections[0].value = desc.clone(); }
+        }
+        if let Some(handle) = skin_images.handles.get(idx) {
+            let h = handle.clone();
+            for mut img in img_q.p0().iter_mut() { img.texture = h.clone(); }
+        }
+    }
+
+    if map_changed {
+        let idx = carousel_state.map_idx;
+        if let Some(m) = map_catalog.maps.get(idx) {
+            let scene = match m.id.as_str() {
+                "ice_caves"     => SceneKind::IceCaves,
+                "desert_planet" => SceneKind::DesertPlanet,
+                _               => SceneKind::SpaceAsteroids,
+            };
+            active_scene.0 = scene.clone();
+
+            let map_label = m.label.clone();
+            let map_desc  = m.description.clone();
+            for mut t in text_q.p2().iter_mut() { t.sections[0].value = map_label.clone(); }
+            for mut t in text_q.p3().iter_mut() { t.sections[0].value = map_desc.clone(); }
+
+            let scores = leaderboard.scores(&scene);
+            let scores_text = if scores.is_empty() {
+                "No records yet".into()
+            } else {
+                scores.iter().enumerate()
+                    .map(|(i, &s)| format!("{}  {}", ["#1", "#2", "#3"][i], fmt_time(s)))
+                    .collect::<Vec<_>>()
+                    .join("   ")
+            };
+            for mut t in text_q.p4().iter_mut() { t.sections[0].value = scores_text.clone(); }
+        }
+        if let Some(handle) = map_images.handles.get(idx) {
+            let h = handle.clone();
+            for mut img in img_q.p1().iter_mut() { img.texture = h.clone(); }
         }
     }
 }

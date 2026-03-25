@@ -1,11 +1,9 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::components::{AlienHealthPip, AlienShip, Explosion, MainCamera, Missile, SpawnPortal};
-use crate::resources::{AlienSpawnTimer, GameState, GameTimer, TimePaused};
-
-const ALIEN_FIRST_SPAWN: f32 = 25.0;
-const MAX_ALIENS: usize = 12;
+use crate::components::{AlienHealthPip, AlienShip, MainCamera, Missile, SpawnPortal};
+use crate::resources::{AlienSpawnTimer, GameTimer, TimePaused};
+use crate::systems::data_loader::EnemyCatalog;
 
 // ── Spawner ───────────────────────────────────────────────────────────────────
 pub fn alien_ship_spawner_system(
@@ -18,9 +16,11 @@ pub fn alien_ship_spawner_system(
     paused: Res<TimePaused>,
     camera_q: Query<&Transform, With<MainCamera>>,
     aliens: Query<(), With<AlienShip>>,
+    enemy_catalog: Res<EnemyCatalog>,
 ) {
-    if paused.0 || game_timer.0 < ALIEN_FIRST_SPAWN { return; }
-    if aliens.iter().count() >= MAX_ALIENS { return; }
+    let def = enemy_catalog.active();
+    if paused.0 || game_timer.0 < def.first_spawn_time { return; }
+    if aliens.iter().count() >= def.max_count { return; }
 
     spawn_timer.0.tick(time.delta());
     if !spawn_timer.0.just_finished() { return; }
@@ -28,7 +28,7 @@ pub fn alien_ship_spawner_system(
     let Ok(cam) = camera_q.get_single() else { return };
     let mut rng = rand::thread_rng();
 
-    let spawn_dist = rng.gen_range(7_000.0_f32..12_000.0);
+    let spawn_dist = rng.gen_range(def.spawn_dist_min..def.spawn_dist_max);
     let angle_h = rng.gen_range(0.0_f32..std::f32::consts::TAU);
     let angle_v = rng.gen_range(-0.3_f32..0.3);
     let dir = Vec3::new(
@@ -38,26 +38,33 @@ pub fn alien_ship_spawner_system(
     );
     let spawn_pos = cam.translation + dir * spawn_dist;
 
-    let speed = rng.gen_range(1_400.0_f32..2_200.0);
-    let shoot_interval = rng.gen_range(3.5_f32..5.5);
+    let speed = rng.gen_range(def.speed_min..def.speed_max);
+    let shoot_interval = rng.gen_range(def.shoot_interval_min..def.shoot_interval_max);
 
-    // ── Materials ─────────────────────────────────────────────────────────────
+    // ── Materials (colours come from the active EnemyDef) ─────────────────────
+    let [hr, hg, hb] = def.hull_color;
+    let [her, heg, heb] = def.hull_emissive;
+    let [rr, rg, rb] = def.rim_color;
+    let [rer, reg, reb] = def.rim_emissive;
+    let [dr, dg, db] = def.dome_color;
+    let [der, deg, deb] = def.dome_emissive;
+
     let hull_mat = materials.add(StandardMaterial {
-        base_color: Color::rgb(0.10, 0.04, 0.20),
-        emissive: Color::rgb(1.5, 0.0, 3.0),
+        base_color: Color::rgb(hr, hg, hb),
+        emissive: Color::rgb(her, heg, heb),
         perceptual_roughness: 0.25,
         metallic: 0.95,
         ..default()
     });
     let rim_mat = materials.add(StandardMaterial {
-        base_color: Color::rgb(0.02, 0.40, 0.60),
-        emissive: Color::rgb(0.0, 8.0, 12.0),
+        base_color: Color::rgb(rr, rg, rb),
+        emissive: Color::rgb(rer, reg, reb),
         unlit: true,
         ..default()
     });
     let dome_mat = materials.add(StandardMaterial {
-        base_color: Color::rgba(0.05, 0.90, 0.30, 0.80),
-        emissive: Color::rgb(0.0, 3.0, 0.6),
+        base_color: Color::rgba(dr, dg, db, 0.80),
+        emissive: Color::rgb(der, deg, deb),
         alpha_mode: AlphaMode::Blend,
         perceptual_roughness: 0.08,
         ..default()
@@ -157,7 +164,7 @@ pub fn alien_ship_spawner_system(
                 transform: Transform::from_translation(spawn_pos),
                 ..default()
             },
-            AlienShip { speed, shoot_timer: shoot_interval, shoot_interval, health: 3 },
+            AlienShip { speed, shoot_timer: shoot_interval, shoot_interval, health: def.health },
         ))
         .with_children(|ship| {
             // Outer glowing rim
@@ -312,10 +319,8 @@ pub fn alien_ship_shoot_system(
     paused: Res<TimePaused>,
     mut aliens: Query<(&Transform, &mut AlienShip)>,
     camera_q: Query<&Transform, (With<MainCamera>, Without<AlienShip>)>,
-    game_timer: Res<GameTimer>,
 ) {
     if paused.0 { return; }
-    if game_timer.0 < ALIEN_FIRST_SPAWN { return; }
     let Ok(cam) = camera_q.get_single() else { return };
     let dt = time.delta_seconds();
 

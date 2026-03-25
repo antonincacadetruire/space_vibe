@@ -1,0 +1,8 @@
+{
+  "id": "space_asteroids",
+  "label": "Asteroid Field",
+  "description": "Race through Saturn's rings in a deadly asteroid belt.",
+  "boundary_radius": 400000.0,
+  "accent_color": [0.15, 0.90, 0.98],
+  "preview_svg": "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 80'><rect width='120' height='80' fill='#030a10'/><circle cx='60' cy='40' r='22' fill='#c8a040' opacity='0.9'/><ellipse cx='60' cy='40' rx='44' ry='8' fill='none' stroke='#8b6820' stroke-width='4' opacity='0.7'/><ellipse cx='60' cy='40' rx='52' ry='10' fill='none' stroke='#6b5015' stroke-width='2' opacity='0.5'/><circle cx='15' cy='18' r='4' fill='#888070'/><circle cx='95' cy='25' r='3' fill='#888070'/><circle cx='30' cy='60' r='5' fill='#888070'/><circle cx='100' cy='58' r='3.5' fill='#888070'/><circle cx='75' cy='12' r='2.5' fill='#888070'/><circle cx='10' cy='50' r='2' fill='#aaa090'/><circle cx='55' cy='70' r='3' fill='#888070'/><circle cx='105' cy='40' r='2' fill='#aaa090'/></svg>"
+}

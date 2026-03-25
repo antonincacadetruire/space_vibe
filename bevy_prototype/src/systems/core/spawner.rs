@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use bevy::prelude::*;
 use bevy::render::mesh::VertexAttributeValues;
 use rand::Rng;

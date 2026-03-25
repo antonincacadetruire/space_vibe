@@ -1,8 +1,8 @@
 use bevy::prelude::*;
-use rand::Rng;
 
 use crate::components::SceneEntity;
-use crate::resources::{ActiveScene, MouseLook, PrevCameraPosition, SceneKind, SpawnTransform};
+use crate::resources::{ActiveScene, MouseLook, PrevCameraPosition, SceneKind, SpawnTransform, ZoneBoundary};
+use crate::systems::data_loader::MapCatalog;
 use super::space_scene::spawn_space_scene;
 use super::ice_caves::spawn_ice_caves_scene;
 use super::desert_planet::spawn_desert_planet_scene;
@@ -18,6 +18,7 @@ pub fn spawn_active_scene_system(
     mut spawn_transform: ResMut<SpawnTransform>,
     mut mouse_look: ResMut<MouseLook>,
     mut prev_cam:   ResMut<PrevCameraPosition>,
+    map_catalog:   Res<MapCatalog>,
 ) {
     let mut rng = rand::thread_rng();
 
@@ -38,6 +39,22 @@ pub fn spawn_active_scene_system(
     mouse_look.yaw   = yaw;
     mouse_look.pitch = pitch;
     prev_cam.0       = transform.translation;
+
+    // Read boundary from the JSON catalog if available; fall back to defaults.
+    let map_id = match &active_scene.0 {
+        SceneKind::SpaceAsteroids => "space_asteroids",
+        SceneKind::IceCaves       => "ice_caves",
+        SceneKind::DesertPlanet   => "desert_planet",
+    };
+    let boundary_radius = map_catalog
+        .by_id(map_id)
+        .map(|m| m.boundary_radius)
+        .unwrap_or_else(|| match &active_scene.0 {
+            SceneKind::SpaceAsteroids => 400_000.0,
+            SceneKind::IceCaves       => 160_000.0,
+            SceneKind::DesertPlanet   => 280_000.0,
+        });
+    commands.insert_resource(ZoneBoundary(boundary_radius));
 }
 
 /// Despawns all entities tagged SceneEntity (called on OnExit(Playing)).

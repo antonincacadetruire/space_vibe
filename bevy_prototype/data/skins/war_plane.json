@@ -1,0 +1,6 @@
+{
+  "id": "war_plane",
+  "label": "War Plane",
+  "description": "A sleek military fighter jet with twin engines.",
+  "preview_svg": "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 80'><rect width='120' height='80' fill='#050c10'/><g transform='translate(60,40)'><polygon points='0,-30 4,-5 2,5 0,8 -2,5 -4,-5' fill='#303640'/><polygon points='-28,2 -8,-2 -4,4 -8,8' fill='#303640'/><polygon points='28,2 8,-2 4,4 8,8' fill='#303640'/><polygon points='-10,12 -3,8 3,8 10,12' fill='#303640'/><polygon points='-3,8 3,8 3,16 -3,16' fill='#2a3038'/><rect x='-1.5' y='-10' width='3' height='8' fill='#2080b0' opacity='0.8'/><circle cx='-3' cy='14' r='2.5' fill='#3060ff' opacity='0.9'/><circle cx='3' cy='14' r='2.5' fill='#3060ff' opacity='0.9'/><line x1='0' y1='-30' x2='0' y2='14' stroke='#801010' stroke-width='0.5' opacity='0.5'/></g></svg>"
+}

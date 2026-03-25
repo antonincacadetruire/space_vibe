@@ -14,7 +14,7 @@ pub fn ui_update_system(
         Query<&mut Text, (With<SpeedUi>, Without<CompassPitchText>)>,
         Query<&mut Text, (With<CompassPitchText>, Without<SpeedUi>)>,
     )>,
-    time: Res<Time>,
+    _time: Res<Time>,
     camera_q: Query<&Transform, With<MainCamera>>,
     mut needle_q: Query<&mut Transform, (With<crate::components::CompassNeedle>, Without<MainCamera>)>,
 ) {

@@ -50,6 +50,11 @@ pub fn setup_death_screen(
             "You collided with an asteroid",
             Color::rgb(0.95, 0.20, 0.20),
         ),
+        DeathCause::Terrain => (
+            "IMPACT",
+            "You flew into the terrain",
+            Color::rgb(0.80, 0.55, 0.10),
+        ),
     };
 
     let fmt = |v: f32| {

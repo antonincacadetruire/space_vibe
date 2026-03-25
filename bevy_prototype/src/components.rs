@@ -73,11 +73,11 @@ pub struct SettingsBackButton;
 #[derive(Component)]
 pub struct SensitivityText;
 
-#[derive(Component)]
-pub struct RebindButton;
-
-#[derive(Component)]
-pub struct RebindText;
+// These UI rebind components are reserved for future use.
+#[allow(dead_code)]
+#[derive(Component)] pub struct RebindButton;
+#[allow(dead_code)]
+#[derive(Component)] pub struct RebindText;
 
 // ── Missile components ────────────────────────────────────────────────────────
 #[derive(Component)]
@@ -87,6 +87,8 @@ pub struct Missile {
     pub lifetime: f32,  // seconds remaining
 }
 
+// MissileTrail reserved for future particle trail effect.
+#[allow(dead_code)]
 #[derive(Component)]
 pub struct MissileTrail;
 
@@ -159,13 +161,39 @@ pub struct AlienHealthPip {
 #[derive(Component)]
 pub struct SceneEntity;
 
-// ── Scene selection button data ───────────────────────────────────────────────
+// ── Player ship 3-D model (child of the main camera) ─────────────────────────
 #[derive(Component)]
-pub struct SceneSelectButton {
-    pub scene: crate::resources::SceneKind,
-}
+pub struct PlayerShipModel;
+// UI markers for start menu carousels
+#[derive(Component, Default)] pub struct SkinLeftButton;
+#[derive(Component, Default)] pub struct SkinRightButton;
+#[derive(Component, Default)] pub struct SkinLabel;
+#[derive(Component, Default)] pub struct MapLeftButton;
+#[derive(Component, Default)] pub struct MapRightButton;
+#[derive(Component, Default)] pub struct MapLabel;
+/// Preview image node for the currently-selected skin.
+#[derive(Component)] pub struct SkinPreviewImage;
+/// Preview image node for the currently-selected map.
+#[derive(Component)] pub struct MapPreviewImage;
+/// Small description text under the skin label.
+#[derive(Component)] pub struct SkinDescLabel;
+/// Small description text under the map label.
+#[derive(Component)] pub struct MapDescLabel;
+/// Best-scores text block for the current map.
+#[derive(Component)] pub struct MapScoresLabel;
 
-// ── Per-scene play button markers (for simplifying button queries) ────────────
-#[derive(Component)] pub struct PlaySpaceButton;
-#[derive(Component)] pub struct PlayIceButton;
-#[derive(Component)] pub struct PlayDesertButton;
+// ── In-game LLM / Copilot chat UI markers ────────────────────────────────────
+/// Root node of the chat overlay panel.
+#[derive(Component)] pub struct CopilotChatRoot;
+/// Scrolling conversation log text node.
+#[derive(Component)] pub struct CopilotChatLog;
+/// The text input box node.
+#[derive(Component)] pub struct CopilotInputBox;
+/// Marker for the actual Text inside the input box (child of CopilotInputBox node).
+#[derive(Component)] pub struct CopilotInputText;
+/// Send button.
+#[derive(Component)] pub struct CopilotSendButton;
+/// Save-last-JSON button (only visible when a JSON block was returned).
+#[derive(Component)] pub struct CopilotSaveButton;
+/// Status / spinner text node.
+#[derive(Component)] pub struct CopilotStatusText;
