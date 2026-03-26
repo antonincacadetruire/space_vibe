@@ -19,12 +19,34 @@ use bevy::window::{PrimaryWindow, CursorGrabMode, CursorIcon};
 use std::sync::{Arc, Mutex};
 
 use crate::components::{
-    CopilotChatRoot, CopilotChatLog, CopilotInputBox, CopilotInputText,
-    CopilotSendButton, CopilotSaveButton, CopilotStatusText,
+    CopilotChatRoot, CopilotChatBlocker, CopilotChatLog, CopilotInputBox, CopilotInputText,
+    CopilotSendButton, CopilotSaveButton, CopilotChangeKeyButton, CopilotStatusText,
 };
 use crate::resources::GameState;
 use crate::setup::resolve_ui_font_path;
 use crate::systems::data_loader::LlmConfigResource;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Save `api_key` to `data/secrets.json`.  Returns Err string on failure.
+fn save_api_key(key: &str) -> Result<(), String> {
+    let data_dir = {
+        let cwd = std::path::PathBuf::from("data");
+        if cwd.exists() {
+            cwd
+        } else if let Some(p) = std::env::current_exe().ok()
+            .and_then(|e| e.parent().map(|d| d.join("data")))
+        {
+            p
+        } else {
+            std::path::PathBuf::from("data")
+        }
+    };
+    let path = data_dir.join("secrets.json");
+    let json = serde_json::json!({ "api_key": key });
+    std::fs::write(&path, json.to_string())
+        .map_err(|e| format!("write {:?}: {e}", path))
+}
 
 // ── Shared result slot ────────────────────────────────────────────────────────
 
@@ -66,6 +88,8 @@ pub struct LlmChatState {
     pub pending_result: Option<ResultSlot>,
     /// If the last AI reply contained a JSON block, this holds the raw JSON.
     pub last_json: Option<String>,
+    /// When true, the next submitted text is treated as an API key, not a chat message.
+    pub awaiting_api_key: bool,
 }
 
 impl LlmChatState {
@@ -206,6 +230,25 @@ pub fn setup_llm_chat_ui(mut commands: Commands, asset_server: Res<AssetServer>)
     let font = asset_server.load(resolve_ui_font_path());
     let btn_label = TextStyle { font: font.clone(), font_size: 13.0, color: Color::rgb(0.88, 0.96, 1.00) };
 
+    // ── Full-screen transparent click blocker (behind chat panel) ─────────
+    commands.spawn((
+        CopilotChatBlocker,
+        NodeBundle {
+            style: Style {
+                display: Display::None,
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+            background_color: Color::rgba(0.0, 0.0, 0.0, 0.0).into(),
+            z_index: ZIndex::Global(199),
+            ..default()
+        },
+    ));
+
     // ── Root overlay (covers right portion of screen) ─────────────────────
     commands
         .spawn((
@@ -273,7 +316,7 @@ pub fn setup_llm_chat_ui(mut commands: Commands, asset_server: Res<AssetServer>)
                     TextBundle {
                         text: Text::from_sections(vec![
                             TextSection::new(
-                                "[Ask me to generate a map, skin or enemy – e.g. \"generate a toxic gas planet map\"]\n",
+                                "[Ask me to generate a map, skin or enemy]\n[Type /setkey YOUR_GITHUB_PAT to set your API key]\n",
                                 TextStyle { font: font.clone(), font_size: 13.0, color: Color::rgba(0.55, 0.75, 0.80, 0.55) },
                             ),
                         ]),
@@ -374,6 +417,27 @@ pub fn setup_llm_chat_ui(mut commands: Commands, asset_server: Res<AssetServer>)
                         TextStyle { font: font.clone(), font_size: 12.0, color: Color::rgb(0.45, 1.0, 0.60) },
                     ));
                 });
+
+                // Change API key button (always visible)
+                row.spawn((
+                    CopilotChangeKeyButton,
+                    ButtonBundle {
+                        style: Style {
+                            width: Val::Px(100.0),
+                            height: Val::Px(26.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        background_color: Color::rgb(0.18, 0.10, 0.04).into(),
+                        ..default()
+                    },
+                )).with_children(|btn| {
+                    btn.spawn(TextBundle::from_section(
+                        "Change Key",
+                        TextStyle { font: font.clone(), font_size: 12.0, color: Color::rgb(1.0, 0.75, 0.30) },
+                    ));
+                });
             });
         });
 }
@@ -383,8 +447,10 @@ pub fn setup_llm_chat_ui(mut commands: Commands, asset_server: Res<AssetServer>)
 pub fn teardown_llm_chat_ui(
     mut commands: Commands,
     q: Query<Entity, With<CopilotChatRoot>>,
+    blocker_q: Query<Entity, With<CopilotChatBlocker>>,
 ) {
     for e in &q { commands.entity(e).despawn_recursive(); }
+    for e in &blocker_q { commands.entity(e).despawn_recursive(); }
 }
 
 // ── Toggle system (F2) ─────────────────────────────────────────────────────────
@@ -393,30 +459,50 @@ pub fn llm_chat_toggle_system(
     keys: Res<Input<KeyCode>>,
     mut chat: ResMut<LlmChatState>,
     mut q: Query<&mut Style, With<CopilotChatRoot>>,
+    mut blocker_q: Query<&mut Style, (With<CopilotChatBlocker>, Without<CopilotChatRoot>)>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
     game_state: Res<State<GameState>>,
+    llm_cfg: Res<LlmConfigResource>,
 ) {
-    if *game_state.get() != GameState::Playing {
+    let state = game_state.get();
+    if *state != GameState::Playing && *state != GameState::StartMenu {
         return;
     }
 
     if keys.just_pressed(KeyCode::F2) {
         chat.open = !chat.open;
-        let display = if chat.open { Display::Flex } else { Display::None };
-        for mut style in &mut q {
+        // cursor management only in Playing state
+        if *state == GameState::Playing {
+            if let Ok(mut win) = windows.get_single_mut() {
+                if chat.open {
+                    win.cursor.visible = true;
+                    win.cursor.grab_mode = CursorGrabMode::None;
+                    win.cursor.icon = CursorIcon::Text;
+                } else {
+                    win.cursor.visible = false;
+                    win.cursor.grab_mode = CursorGrabMode::Locked;
+                    win.cursor.icon = CursorIcon::Default;
+                }
+            }
+        }
+    }
+
+    // If chat just opened and no API key is set, enter key-prompt mode
+    if chat.open && !chat.awaiting_api_key && llm_cfg.0.api_key.is_empty() && chat.conversation.is_empty() {
+        chat.awaiting_api_key = true;
+        chat.add_ai("No API key found. Please paste your GitHub Personal Access Token (PAT):");
+    }
+
+    // Always sync chat.open → Display so any setter (F2 or button) takes effect.
+    let display = if chat.open { Display::Flex } else { Display::None };
+    for mut style in &mut q {
+        if style.display != display {
             style.display = display;
         }
-        // Show/hide cursor
-        if let Ok(mut win) = windows.get_single_mut() {
-            if chat.open {
-                win.cursor.visible = true;
-                win.cursor.grab_mode = CursorGrabMode::None;
-                win.cursor.icon = CursorIcon::Text;
-            } else {
-                win.cursor.visible = false;
-                win.cursor.grab_mode = CursorGrabMode::Locked;
-                win.cursor.icon = CursorIcon::Default;
-            }
+    }
+    for mut style in &mut blocker_q {
+        if style.display != display {
+            style.display = display;
         }
     }
 }
@@ -424,10 +510,11 @@ pub fn llm_chat_toggle_system(
 // ── Input system (keyboard → buffer) ─────────────────────────────────────────
 
 pub fn llm_chat_input_system(
+    keys: Res<Input<KeyCode>>,
     mut key_evts: EventReader<KeyboardInput>,
     mut char_evts: EventReader<ReceivedCharacter>,
     mut chat: ResMut<LlmChatState>,
-    llm_cfg: Res<LlmConfigResource>,
+    mut llm_cfg: ResMut<LlmConfigResource>,
     send_btn_q: Query<&Interaction, With<CopilotSendButton>>,
     mut input_text_q: Query<&mut Text, (With<CopilotInputText>, Without<CopilotChatLog>, Without<CopilotStatusText>)>,
 ) {
@@ -442,14 +529,26 @@ pub fn llm_chat_input_system(
         }
     }
 
-    // ── Key events (Backspace / Enter)
+    // ── Key events (Backspace / Enter / Ctrl+V paste)
     let mut should_send = false;
+    let ctrl_held = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     for ev in key_evts.iter() {
         if ev.state != ButtonState::Pressed { continue; }
         match ev.key_code {
             Some(KeyCode::Back) => { chat.input_buffer.pop(); }
             Some(KeyCode::Return) | Some(KeyCode::NumpadEnter) => {
                 should_send = true;
+            }
+            Some(KeyCode::V) if ctrl_held => {
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    if let Ok(text) = clipboard.get_text() {
+                        for c in text.chars() {
+                            if !c.is_control() {
+                                chat.input_buffer.push(c);
+                            }
+                        }
+                    }
+                }
             }
             _ => {}
         }
@@ -473,6 +572,38 @@ pub fn llm_chat_input_system(
     if should_send && !chat.input_buffer.is_empty() {
         let prompt = chat.input_buffer.trim().to_owned();
         chat.input_buffer.clear();
+
+        // ── API key prompt mode ────────────────────────────────────────────
+        if chat.awaiting_api_key {
+            let key = prompt.trim().to_owned();
+            match save_api_key(&key) {
+                Ok(()) => {
+                    llm_cfg.0.api_key = key;
+                    chat.awaiting_api_key = false;
+                    chat.add_ai("✓ API key saved! You can now ask me to generate maps, skins or enemies.");
+                }
+                Err(e) => {
+                    chat.add_ai(&format!("✗ Failed to save API key: {e}\nPlease try again:"));
+                }
+            }
+            return;
+        }
+
+        // ── /setkey command ────────────────────────────────────────────────
+        if let Some(key) = prompt.strip_prefix("/setkey ") {
+            let key = key.trim().to_owned();
+            match save_api_key(&key) {
+                Ok(()) => {
+                    llm_cfg.0.api_key = key;
+                    chat.add_ai("✓ API key saved to data/secrets.json and applied. You can now chat with the AI.");
+                }
+                Err(e) => {
+                    chat.add_ai(&format!("✗ Failed to save API key: {e}"));
+                }
+            }
+            return;
+        }
+
         chat.add_user(&prompt);
         chat.status = LlmStatus::Waiting;
         chat.last_json = None;
@@ -583,8 +714,15 @@ pub fn llm_chat_poll_system(
 pub fn llm_chat_save_system(
     mut chat: ResMut<LlmChatState>,
     interaction_q: Query<&Interaction, (Changed<Interaction>, With<CopilotSaveButton>)>,
+    change_key_q: Query<&Interaction, (Changed<Interaction>, With<CopilotChangeKeyButton>)>,
     mut status_q: Query<&mut Text, (With<CopilotStatusText>, Without<CopilotChatLog>, Without<CopilotInputText>)>,
 ) {
+    // ── Change Key button
+    for interaction in &change_key_q {
+        if *interaction != Interaction::Pressed { continue; }
+        chat.awaiting_api_key = true;
+        chat.add_ai("Please paste your new GitHub Personal Access Token (PAT):");
+    }
     for interaction in &interaction_q {
         if *interaction != Interaction::Pressed { continue; }
         if let Some(json) = &chat.last_json.clone() {

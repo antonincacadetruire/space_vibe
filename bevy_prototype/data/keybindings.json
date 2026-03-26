@@ -1,0 +1,8 @@
+{
+    "throttle_up": "W",
+    "throttle_down": "S",
+    "vertical_up": "E",
+    "vertical_down": "Q",
+    "toggle_pause": "Space",
+    "toggle_menu": "Escape"
+}

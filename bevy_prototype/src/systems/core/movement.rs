@@ -2,6 +2,7 @@ use bevy::prelude::*;
 
 use crate::components::{Asteroid, BeltAsteroid, MainCamera, Radius, Velocity, AngularVelocity};
 use crate::resources::{DeathCause, DesertTerrainData, Throttle, TimePaused, VelocityUpdates, MenuState, Keybindings, PrevCameraPosition, GameState, GameTimer, FreeLook, ZoneBoundary};
+use crate::systems::ui::copilot_chat::LlmChatState;
 
 pub fn player_movement_system(
     time: Res<Time>,
@@ -13,14 +14,15 @@ pub fn player_movement_system(
     keyboard: Res<Input<KeyCode>>,
     free_look: Res<FreeLook>,
     boundary: Res<ZoneBoundary>,
+    chat: Res<LlmChatState>,
 ) {
     // Toggle pause via keybinding
     if keyboard.just_pressed(keyb.toggle_pause) {
         paused.0 = !paused.0;
     }
 
-    // If the menu is open, prevent player movement
-    if menu.open {
+    // If the menu or chat is open, prevent player movement
+    if menu.open || chat.open {
         return;
     }
 
@@ -162,10 +164,12 @@ pub fn desert_terrain_death_system(
         return;
     }
 
-    // Mountain death — check against stored kill spheres
-    for &(center, radius) in &terrain.mountain_spheres {
-        if pos.distance(center) < radius {
-            info!("Player flew into a mountain! Score: {:.1}s", game_timer.0);
+    // Mountain / spire / dune death — check against stored kill ellipsoids
+    for &(center, hr, vr) in &terrain.kill_zones {
+        let d = pos - center;
+        let normalized = (d.x * d.x + d.z * d.z) / (hr * hr) + (d.y * d.y) / (vr * vr);
+        if normalized < 1.0 {
+            info!("Player flew into terrain obstacle! Score: {:.1}s", game_timer.0);
             *death_cause = DeathCause::Terrain;
             next_state.set(GameState::Dead);
             return;

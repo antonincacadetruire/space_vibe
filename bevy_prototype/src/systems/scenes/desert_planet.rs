@@ -143,6 +143,8 @@ pub fn spawn_desert_planet_scene(
     }
 
     // ── Sand dune mounds ───────────────────────────────────────────────────────
+    let mut kill_zones: Vec<(Vec3, f32, f32)> = Vec::new();
+
     let dune_mat = materials.add(StandardMaterial {
         base_color: Color::rgb(0.78, 0.58, 0.32),
         perceptual_roughness: 1.0,
@@ -155,6 +157,7 @@ pub fn spawn_desert_planet_scene(
         let rx = rng.gen_range(4_000.0_f32..28_000.0);
         let ry = rng.gen_range(400.0_f32..2_200.0);
         let rz = rng.gen_range(4_000.0_f32..28_000.0);
+        let dune_pos = Vec3::new(x, FLOOR_Y + ry * 0.3, z);
         commands.spawn((
             PbrBundle {
                 mesh: meshes.add(Mesh::from(shape::UVSphere {
@@ -163,12 +166,14 @@ pub fn spawn_desert_planet_scene(
                     stacks: 6,
                 })),
                 material: dune_mat.clone(),
-                transform: Transform::from_translation(Vec3::new(x, FLOOR_Y + ry * 0.3, z))
+                transform: Transform::from_translation(dune_pos)
                     .with_scale(Vec3::new(rx, ry, rz)),
                 ..default()
             },
             SceneEntity,
         ));
+        // Dunes are flat mounds — add ellipsoid kill zone
+        kill_zones.push((dune_pos, (rx + rz) * 0.35, ry * 0.7));
     }
 
     // ── Mountain range on the horizon ──────────────────────────────────────────
@@ -192,8 +197,6 @@ pub fn spawn_desert_planet_scene(
         ..default()
     });
 
-    let mut mountain_spheres: Vec<(Vec3, f32)> = Vec::new();
-
     for i in 0..56 {
         let base_angle = (i as f32 / 56.0) * TAU + rng.gen_range(-0.05_f32..0.05);
         let dist      = rng.gen_range(160_000.0_f32..300_000.0);
@@ -205,8 +208,9 @@ pub fn spawn_desert_planet_scene(
             base_angle.sin() * dist,
         );
 
-        // Store kill sphere — slightly smaller than visual mesh so players just clip the visual edge.
-        mountain_spheres.push((mountain_pos, base_r * 0.80));
+        // Store kill ellipsoid — horizontal radius slightly smaller than visual,
+        // vertical radius matches the full height.
+        kill_zones.push((mountain_pos, base_r * 0.80, height * 0.80));
 
         let mat = if rng.gen_bool(0.35) { rock_dark_mat.clone() } else { rock_mat.clone() };
 
@@ -295,7 +299,7 @@ pub fn spawn_desert_planet_scene(
             SceneEntity,
         ));
         // Add smaller spires as kill spheres too (they're smaller but still dangerous).
-        mountain_spheres.push((pos, r * 0.9));
+        kill_zones.push((pos, r * 0.9, h * 0.9));
     }
 
     // ── Atmospheric dust haze ring (semi-transparent sphere near ground) ───────
@@ -323,7 +327,7 @@ pub fn spawn_desert_planet_scene(
     // Insert terrain data so the death system can use it.
     commands.insert_resource(DesertTerrainData {
         floor_y: FLOOR_KILL_Y,
-        mountain_spheres,
+        kill_zones,
     });
 
     // ── Desert boulders / floating rock debris ─────────────────────────────────

@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
 // ── Game states ──────────────────────────────────────────────────────────────
 #[derive(States, Debug, Clone, Eq, PartialEq, Hash, Default)]
@@ -132,6 +133,7 @@ pub struct MenuState {
     pub open: bool,
     pub prev_paused: bool,
     pub settings_open: bool,
+    pub commands_open: bool,
 }
 
 #[derive(Resource)]
@@ -157,6 +159,103 @@ impl Default for Keybindings {
     }
 }
 
+/// JSON-friendly keybinding representation.  KeyCode names are stored as
+/// debug-format strings (e.g. `"W"`, `"Space"`, `"Escape"`).
+#[derive(Serialize, Deserialize)]
+struct KeybindingsJson {
+    throttle_up: String,
+    throttle_down: String,
+    vertical_up: String,
+    vertical_down: String,
+    toggle_pause: String,
+    toggle_menu: String,
+}
+
+impl Keybindings {
+    /// All actions, in display order.
+    pub const ACTIONS: &'static [Action] = &[
+        Action::ThrottleUp,
+        Action::ThrottleDown,
+        Action::VerticalUp,
+        Action::VerticalDown,
+        Action::TogglePause,
+        Action::ToggleMenu,
+    ];
+
+    pub fn get(&self, action: Action) -> KeyCode {
+        match action {
+            Action::ThrottleUp   => self.throttle_up,
+            Action::ThrottleDown => self.throttle_down,
+            Action::VerticalUp   => self.vertical_up,
+            Action::VerticalDown => self.vertical_down,
+            Action::TogglePause  => self.toggle_pause,
+            Action::ToggleMenu   => self.toggle_menu,
+        }
+    }
+
+    pub fn set(&mut self, action: Action, code: KeyCode) {
+        match action {
+            Action::ThrottleUp   => self.throttle_up = code,
+            Action::ThrottleDown => self.throttle_down = code,
+            Action::VerticalUp   => self.vertical_up = code,
+            Action::VerticalDown => self.vertical_down = code,
+            Action::TogglePause  => self.toggle_pause = code,
+            Action::ToggleMenu   => self.toggle_menu = code,
+        }
+    }
+
+    fn keybindings_path() -> std::path::PathBuf {
+        let cwd = std::path::PathBuf::from("data/keybindings.json");
+        if cwd.parent().map(|p| p.exists()).unwrap_or(false) {
+            cwd
+        } else {
+            std::env::current_exe()
+                .ok()
+                .and_then(|e| e.parent().map(|d| d.join("data").join("keybindings.json")))
+                .unwrap_or_else(|| std::path::PathBuf::from("data/keybindings.json"))
+        }
+    }
+
+    /// Load keybindings from `data/keybindings.json`, falling back to defaults.
+    pub fn load() -> Self {
+        let path = Self::keybindings_path();
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            return Keybindings::default();
+        };
+        let Ok(json) = serde_json::from_str::<KeybindingsJson>(&text) else {
+            warn!("Could not parse {:?}. Using default keybindings.", path);
+            return Keybindings::default();
+        };
+        info!("Loaded keybindings from {:?}", path);
+        Keybindings {
+            throttle_up:   keycode_from_str(&json.throttle_up).unwrap_or(KeyCode::W),
+            throttle_down: keycode_from_str(&json.throttle_down).unwrap_or(KeyCode::S),
+            vertical_up:   keycode_from_str(&json.vertical_up).unwrap_or(KeyCode::E),
+            vertical_down: keycode_from_str(&json.vertical_down).unwrap_or(KeyCode::Q),
+            toggle_pause:  keycode_from_str(&json.toggle_pause).unwrap_or(KeyCode::Space),
+            toggle_menu:   keycode_from_str(&json.toggle_menu).unwrap_or(KeyCode::Escape),
+        }
+    }
+
+    /// Persist current keybindings to `data/keybindings.json`.
+    pub fn save(&self) {
+        let json = KeybindingsJson {
+            throttle_up:   keycode_to_str(self.throttle_up),
+            throttle_down: keycode_to_str(self.throttle_down),
+            vertical_up:   keycode_to_str(self.vertical_up),
+            vertical_down: keycode_to_str(self.vertical_down),
+            toggle_pause:  keycode_to_str(self.toggle_pause),
+            toggle_menu:   keycode_to_str(self.toggle_menu),
+        };
+        let path = Self::keybindings_path();
+        if let Ok(text) = serde_json::to_string_pretty(&json) {
+            if let Err(e) = std::fs::write(&path, text) {
+                warn!("Could not save keybindings to {:?}: {e}", path);
+            }
+        }
+    }
+}
+
 #[derive(Resource, Default)]
 pub struct RebindState(pub Option<Action>);
 
@@ -168,6 +267,72 @@ pub enum Action {
     VerticalDown,
     TogglePause,
     ToggleMenu,
+}
+
+impl Action {
+    pub fn label(self) -> &'static str {
+        match self {
+            Action::ThrottleUp   => "Throttle Up",
+            Action::ThrottleDown => "Throttle Down",
+            Action::VerticalUp   => "Vertical Up",
+            Action::VerticalDown => "Vertical Down",
+            Action::TogglePause  => "Pause",
+            Action::ToggleMenu   => "Menu",
+        }
+    }
+
+    pub fn next(self) -> Option<Action> {
+        match self {
+            Action::ThrottleUp   => Some(Action::ThrottleDown),
+            Action::ThrottleDown => Some(Action::VerticalUp),
+            Action::VerticalUp   => Some(Action::VerticalDown),
+            Action::VerticalDown => Some(Action::TogglePause),
+            Action::TogglePause  => Some(Action::ToggleMenu),
+            Action::ToggleMenu   => None,
+        }
+    }
+}
+
+/// Convert a `KeyCode` to a human-readable string for JSON persistence.
+pub fn keycode_to_str(code: KeyCode) -> String {
+    format!("{:?}", code)
+}
+
+/// Parse a `KeyCode` from its debug-format string (e.g. `"W"`, `"Space"`).
+pub fn keycode_from_str(s: &str) -> Option<KeyCode> {
+    // Build a quick lookup using known key names.
+    // Bevy 0.11 KeyCode is an enum with ~160 variants; we match common ones.
+    match s {
+        "Key1" => Some(KeyCode::Key1), "Key2" => Some(KeyCode::Key2),
+        "Key3" => Some(KeyCode::Key3), "Key4" => Some(KeyCode::Key4),
+        "Key5" => Some(KeyCode::Key5), "Key6" => Some(KeyCode::Key6),
+        "Key7" => Some(KeyCode::Key7), "Key8" => Some(KeyCode::Key8),
+        "Key9" => Some(KeyCode::Key9), "Key0" => Some(KeyCode::Key0),
+        "A" => Some(KeyCode::A), "B" => Some(KeyCode::B), "C" => Some(KeyCode::C),
+        "D" => Some(KeyCode::D), "E" => Some(KeyCode::E), "F" => Some(KeyCode::F),
+        "G" => Some(KeyCode::G), "H" => Some(KeyCode::H), "I" => Some(KeyCode::I),
+        "J" => Some(KeyCode::J), "K" => Some(KeyCode::K), "L" => Some(KeyCode::L),
+        "M" => Some(KeyCode::M), "N" => Some(KeyCode::N), "O" => Some(KeyCode::O),
+        "P" => Some(KeyCode::P), "Q" => Some(KeyCode::Q), "R" => Some(KeyCode::R),
+        "S" => Some(KeyCode::S), "T" => Some(KeyCode::T), "U" => Some(KeyCode::U),
+        "V" => Some(KeyCode::V), "W" => Some(KeyCode::W), "X" => Some(KeyCode::X),
+        "Y" => Some(KeyCode::Y), "Z" => Some(KeyCode::Z),
+        "Escape" => Some(KeyCode::Escape), "Space" => Some(KeyCode::Space),
+        "Return" => Some(KeyCode::Return), "Back" => Some(KeyCode::Back),
+        "Tab" => Some(KeyCode::Tab),
+        "Left" => Some(KeyCode::Left), "Right" => Some(KeyCode::Right),
+        "Up" => Some(KeyCode::Up), "Down" => Some(KeyCode::Down),
+        "LShift" | "ShiftLeft" => Some(KeyCode::ShiftLeft), "RShift" | "ShiftRight" => Some(KeyCode::ShiftRight),
+        "LControl" | "ControlLeft" => Some(KeyCode::ControlLeft), "RControl" | "ControlRight" => Some(KeyCode::ControlRight),
+        "LAlt" | "AltLeft" => Some(KeyCode::AltLeft), "RAlt" | "AltRight" => Some(KeyCode::AltRight),
+        "F1" => Some(KeyCode::F1), "F2" => Some(KeyCode::F2),
+        "F3" => Some(KeyCode::F3), "F4" => Some(KeyCode::F4),
+        "F5" => Some(KeyCode::F5), "F6" => Some(KeyCode::F6),
+        "F7" => Some(KeyCode::F7), "F8" => Some(KeyCode::F8),
+        "F9" => Some(KeyCode::F9), "F10" => Some(KeyCode::F10),
+        "F11" => Some(KeyCode::F11), "F12" => Some(KeyCode::F12),
+        _ => None,
+    }
 }
 
 #[derive(Resource, Default)]
@@ -272,6 +437,6 @@ impl ShipSkin {
 pub struct DesertTerrainData {
     /// Y coordinate of the sand surface (player dies when below this).
     pub floor_y: f32,
-    /// List of (centre, kill_radius) for each mountain peak.
-    pub mountain_spheres: Vec<(Vec3, f32)>,
+    /// List of (centre, horizontal_radius, vertical_radius) ellipsoid kill zones.
+    pub kill_zones: Vec<(Vec3, f32, f32)>,
 }

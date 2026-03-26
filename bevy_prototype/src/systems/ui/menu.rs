@@ -3,7 +3,7 @@ use bevy::input::keyboard::KeyboardInput;
 use bevy::window::{PrimaryWindow, Window};
 
 use crate::components::*;
-use crate::resources::{MenuState, Keybindings, RebindState, Action, MouseLook};
+use crate::resources::{MenuState, Keybindings, RebindState, Action, MouseLook, keycode_to_str};
 use crate::setup::resolve_ui_font_path;
 use crate::systems::core::exit::apply_game_cursor;
 
@@ -154,20 +154,79 @@ fn spawn_settings_menu(panel: &mut ChildBuilder, font: Handle<Font>) {
     });
 }
 
+fn spawn_commands_menu(panel: &mut ChildBuilder, font: Handle<Font>, keyb: &Keybindings, rebind: &RebindState) {
+    panel.spawn(TextBundle::from_section(
+        "Commands",
+        TextStyle { font: font.clone(), font_size: 40.0, color: hud_text_color() },
+    ));
+
+    // Show all current bindings and highlight the one being rebound
+    let mut lines = String::new();
+    for &action in Keybindings::ACTIONS {
+        let key_name = keycode_to_str(keyb.get(action));
+        let prefix = if rebind.0 == Some(action) { ">> " } else { "   " };
+        let suffix = if rebind.0 == Some(action) { "  [press a key]" } else { "" };
+        lines.push_str(&format!("{prefix}{}: {key_name}{suffix}\n", action.label()));
+    }
+
+    panel.spawn((
+        TextBundle::from_section(
+            lines,
+            TextStyle { font: font.clone(), font_size: 18.0, color: Color::rgb(0.75, 0.90, 0.92) },
+        ),
+        CommandsStatusText,
+    ));
+
+    let info = if rebind.0.is_some() {
+        "Press any key to bind the highlighted action"
+    } else {
+        "Click 'Rebind All' to reassign all keys sequentially"
+    };
+    panel.spawn(TextBundle::from_section(
+        info,
+        TextStyle { font: font.clone(), font_size: 14.0, color: Color::rgb(0.35, 0.75, 0.80) },
+    ));
+
+    // Buttons row
+    panel.spawn(NodeBundle {
+        style: Style { flex_direction: FlexDirection::Row, column_gap: Val::Px(12.0), ..default() },
+        ..default()
+    }).with_children(|row| {
+        row.spawn((ButtonBundle { style: button_style(200.0, 50.0), background_color: menu_button_palette(false).0.into(), ..default() }, CommandsButton))
+            .with_children(|b| {
+                b.spawn(TextBundle::from_section("Rebind All", TextStyle { font: font.clone(), font_size: 20.0, color: hud_text_color() }));
+            });
+        row.spawn((ButtonBundle { style: button_style(120.0, 50.0), background_color: menu_button_palette(false).0.into(), ..default() }, CommandsBackButton))
+            .with_children(|b| {
+                b.spawn(TextBundle::from_section("Back", TextStyle { font: font.clone(), font_size: 20.0, color: hud_text_color() }));
+            });
+    });
+}
+
 pub fn menu_ui_system(
     mut commands: Commands,
     menu: Res<MenuState>,
     menu_q: Query<Entity, With<MenuRoot>>,
     main_panel_q: Query<Entity, With<MainMenuPanel>>,
     settings_panel_q: Query<Entity, With<SettingsPanel>>,
+    commands_panel_q: Query<Entity, With<CommandsPanel>>,
     asset_server: Res<AssetServer>,
+    keyb: Res<Keybindings>,
+    rebind: Res<RebindState>,
 ) {
     // spawn UI when menu opens, despawn when closed
     if menu.open {
         let root_entity = menu_q.iter().next();
         let main_panel_present = main_panel_q.iter().next().is_some();
         let settings_panel_present = settings_panel_q.iter().next().is_some();
-        let correct_panel_present = if menu.settings_open { settings_panel_present } else { main_panel_present };
+        let commands_panel_present = commands_panel_q.iter().next().is_some();
+        let correct_panel_present = if menu.commands_open {
+            commands_panel_present
+        } else if menu.settings_open {
+            settings_panel_present
+        } else {
+            main_panel_present
+        };
 
         if root_entity.is_none() || !correct_panel_present {
             if let Some(root) = root_entity {
@@ -187,7 +246,15 @@ pub fn menu_ui_system(
                 ..default()
             }, MenuRoot)).with_children(|parent| {
                 // centered panel
-                if menu.settings_open {
+                if menu.commands_open {
+                    parent.spawn((NodeBundle {
+                        style: panel_style(620.0, 440.0),
+                        background_color: panel_background().into(),
+                        ..default()
+                    }, CommandsPanel)).with_children(|panel| {
+                        spawn_commands_menu(panel, font.clone(), &keyb, &rebind);
+                    });
+                } else if menu.settings_open {
                     parent.spawn((NodeBundle {
                         style: panel_style(620.0, 320.0),
                         background_color: panel_background().into(),
@@ -222,19 +289,22 @@ pub fn menu_button_system(
         Option<&CommandsButton>,
         Option<&QuitButton>,
         Option<&SettingsBackButton>,
+        Option<&CommandsBackButton>,
     ), (Changed<Interaction>, With<Button>)>,
     mut menu: ResMut<MenuState>,
     mut paused: ResMut<crate::resources::TimePaused>,
     mut rebind: ResMut<RebindState>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
-    for (interaction, resume, settings, commands_btn, quit, settings_back) in interaction_q.iter_mut() {
+    for (interaction, resume, settings, commands_btn, quit, settings_back, commands_back) in interaction_q.iter_mut() {
         if *interaction == Interaction::Pressed {
             if resume.is_some() {
                 // close menu and restore previous pause
                 paused.0 = menu.prev_paused;
                 menu.open = false;
                 menu.settings_open = false;
+                menu.commands_open = false;
+                rebind.0 = None;
                 if let Ok(mut window) = windows.get_single_mut() {
                     apply_game_cursor(&mut window);
                 }
@@ -244,9 +314,17 @@ pub fn menu_button_system(
                 std::process::exit(0);
             } else if settings_back.is_some() {
                 menu.settings_open = false;
+            } else if commands_back.is_some() {
+                menu.commands_open = false;
+                rebind.0 = None;
             } else if commands_btn.is_some() {
-                // entering rebind mode for demo: set first action as waiting
-                rebind.0 = Some(Action::ThrottleUp);
+                if menu.commands_open {
+                    // Inside commands panel: start rebinding
+                    rebind.0 = Some(Action::ThrottleUp);
+                } else {
+                    // From main menu: open commands panel
+                    menu.commands_open = true;
+                }
             }
         }
     }
@@ -285,14 +363,15 @@ pub fn button_appearance_system(
         Option<&SensIncreaseButton>,
         Option<&SensDecreaseButton>,
         Option<&SettingsBackButton>,
+        Option<&CommandsBackButton>,
     ), (Changed<Interaction>, With<Button>)>,
 ) {
-    for (interaction, mut background, resume, settings, commands_btn, quit, sens_inc, sens_dec, settings_back) in interaction_q.iter_mut() {
+    for (interaction, mut background, resume, settings, commands_btn, quit, sens_inc, sens_dec, settings_back, commands_back) in interaction_q.iter_mut() {
         let (normal, hovered, pressed) = if quit.is_some() {
             menu_button_palette(true)
         } else if sens_inc.is_some() || sens_dec.is_some() {
             settings_button_palette()
-        } else if resume.is_some() || settings.is_some() || commands_btn.is_some() || settings_back.is_some() {
+        } else if resume.is_some() || settings.is_some() || commands_btn.is_some() || settings_back.is_some() || commands_back.is_some() {
             menu_button_palette(false)
         } else {
             continue;
@@ -306,20 +385,25 @@ pub fn key_capture_system(
     mut key_evr: EventReader<KeyboardInput>,
     mut rebind: ResMut<RebindState>,
     mut keyb: ResMut<Keybindings>,
+    mut commands: Commands,
+    commands_panel_q: Query<Entity, With<CommandsPanel>>,
 ) {
     if rebind.0.is_none() { return; }
     for ev in key_evr.iter() {
         if let Some(code) = ev.key_code {
             if ev.state == bevy::input::ButtonState::Pressed {
-                match rebind.0.unwrap() {
-                    Action::ThrottleUp => keyb.throttle_up = code,
-                    Action::ThrottleDown => keyb.throttle_down = code,
-                    Action::VerticalUp => keyb.vertical_up = code,
-                    Action::VerticalDown => keyb.vertical_down = code,
-                    Action::TogglePause => keyb.toggle_pause = code,
-                    Action::ToggleMenu => keyb.toggle_menu = code,
+                let action = rebind.0.unwrap();
+                keyb.set(action, code);
+                // Advance to next action or finish
+                rebind.0 = action.next();
+                if rebind.0.is_none() {
+                    // All actions bound — save to disk
+                    keyb.save();
                 }
-                rebind.0 = None;
+                // Force panel rebuild to show updated bindings
+                for e in commands_panel_q.iter() {
+                    commands.entity(e).despawn_recursive();
+                }
                 break;
             }
         }

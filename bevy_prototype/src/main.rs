@@ -50,7 +50,7 @@ fn main() {
         .insert_resource(MouseLook { yaw: 0.0, pitch: 0.0, sensitivity: 1.0 })
         .insert_resource(TimePaused(false))
         .insert_resource(MenuState::default())
-        .insert_resource(Keybindings::default())
+        .insert_resource(Keybindings::load())
         .insert_resource(RebindState::default())
         .insert_resource(Throttle(0.0))
         .insert_resource(PrevCameraPosition::default())
@@ -72,8 +72,8 @@ fn main() {
         // ── Startup ──────────────────────────────────────────────────────────
         .add_systems(Startup, (setup::setup, load_catalogs))
         // ── State enter/exit hooks ───────────────────────────────────────────
-        .add_systems(OnEnter(GameState::StartMenu), setup_start_menu)
-        .add_systems(OnExit(GameState::StartMenu), teardown_start_menu)
+        .add_systems(OnEnter(GameState::StartMenu), (setup_start_menu, setup_llm_chat_ui))
+        .add_systems(OnExit(GameState::StartMenu), (teardown_start_menu, teardown_llm_chat_ui))
         .add_systems(OnEnter(GameState::Playing), (
             spawn_active_scene_system,
             enter_playing.after(spawn_active_scene_system),
@@ -97,6 +97,17 @@ fn main() {
             )
                 .run_if(in_state(GameState::StartMenu)),
         )
+        // ── Update: Copilot chat (runs in both StartMenu and Playing) ────────
+        .add_systems(
+            Update,
+            (
+                llm_chat_toggle_system,
+                llm_chat_input_system.after(llm_chat_toggle_system),
+                llm_chat_poll_system.after(llm_chat_input_system),
+                llm_chat_save_system.after(llm_chat_poll_system),
+            )
+                .run_if(in_state(GameState::StartMenu).or_else(in_state(GameState::Playing))),
+        )
         // ── Update: Playing state (batch A – input / movement / HUD) ────────
         .add_systems(
             Update,
@@ -118,17 +129,6 @@ fn main() {
                 sensitivity_text_system.after(sensitivity_button_system),
                 key_capture_system.after(menu_button_system),
                 shoot_laser_system,
-            )
-                .run_if(in_state(GameState::Playing)),
-        )
-        // ── Update: Playing state (batch A2 – Copilot chat) ─────────────────
-        .add_systems(
-            Update,
-            (
-                llm_chat_toggle_system,
-                llm_chat_input_system.after(llm_chat_toggle_system),
-                llm_chat_poll_system.after(llm_chat_input_system),
-                llm_chat_save_system.after(llm_chat_poll_system),
             )
                 .run_if(in_state(GameState::Playing)),
         )

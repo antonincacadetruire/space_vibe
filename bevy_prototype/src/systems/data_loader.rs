@@ -184,7 +184,7 @@ pub struct LlmConfig {
 impl Default for LlmConfig {
     fn default() -> Self {
         LlmConfig {
-            api_url: "https://api.openai.com/v1/chat/completions".into(),
+            api_url: "https://models.inference.ai.azure.com/chat/completions".into(),
             api_key: String::new(),
             model: "gpt-4o".into(),
             system_prompt: concat!(
@@ -350,9 +350,12 @@ fn default_enemy_def() -> EnemyDef {
 }
 
 /// Loads `data/llm_config.json`, falling back to `LlmConfig::default()`.
+/// Then overlays `api_key` from `data/secrets.json` if that file exists and
+/// contains a non-empty key.  The placeholder string "YOUR_GITHUB_PAT_HERE"
+/// is treated as empty so it never sends a bogus Authorization header.
 fn load_llm_config() -> LlmConfig {
     let path = data_dir().join("llm_config.json");
-    match std::fs::read_to_string(&path) {
+    let mut cfg = match std::fs::read_to_string(&path) {
         Ok(text) => match serde_json::from_str::<LlmConfig>(&text) {
             Ok(cfg) => {
                 info!("Loaded LLM config from {:?}", path);
@@ -367,7 +370,27 @@ fn load_llm_config() -> LlmConfig {
             info!("No llm_config.json found – using defaults (set data/llm_config.json to configure AI chat).");
             LlmConfig::default()
         }
+    };
+
+    // Treat the placeholder as empty
+    if cfg.api_key == "YOUR_GITHUB_PAT_HERE" {
+        cfg.api_key.clear();
     }
+
+    // Overlay from data/secrets.json (preferred storage for the actual key)
+    let secrets_path = data_dir().join("secrets.json");
+    if let Ok(text) = std::fs::read_to_string(&secrets_path) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+            if let Some(key) = v.get("api_key").and_then(|k| k.as_str()) {
+                if !key.is_empty() {
+                    cfg.api_key = key.to_owned();
+                    info!("Loaded api_key from {:?}", secrets_path);
+                }
+            }
+        }
+    }
+
+    cfg
 }
 
 // ── SVG → Bevy Image ─────────────────────────────────────────────────────────

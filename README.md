@@ -14,6 +14,8 @@ graph TB
   JSON_SKINS[data/skins/*.json - SkinDef: id, label, SVG preview]
   JSON_ENEMIES[data/enemies/*.json - EnemyDef: colors, speed, health, spawn rules]
   JSON_LLM[data/llm_config.json - api_url, api_key, model, system_prompt]
+  JSON_SECRETS[data/secrets.json - persisted API key]
+  JSON_KEYS[data/keybindings.json - persistent key bindings per action]
   DataLoader[load_catalogs Startup - MapCatalog + SkinCatalog + EnemyCatalog + LlmConfig]
   SVGRast[svg_to_image - resvg rasterisation to Bevy Image handle]
 
@@ -21,7 +23,8 @@ graph TB
   DS[Death Screen - Score + Kill Count + PlayAgain + MainMenu]
   TI[Timer + Kill Count HUD - top-right]
   MM[Minimap - bottom-right - enemy radar]
-  CHAT[Copilot Chat - F2 overlay - LLM generates map/skin/enemy JSON]
+  CHAT[Copilot Chat - F2 overlay - LLM generates map/skin/enemy JSON - works in StartMenu + Playing - click blocker + auto API key prompt]
+  KEYBINDS[Keybindings Resource - load/save JSON - Commands panel rebind UI]
 
   ActiveScene[ActiveScene Resource - SpaceAsteroids / IceCaves / DesertPlanet]
   KillCount[KillCount Resource - reset on enter Playing]
@@ -30,7 +33,7 @@ graph TB
   ShipSkin[ShipSkin Resource - WarPlane / Banana / Mosquito]
   CamMode[CameraMode Resource - FirstPerson / ThirdPerson toggle F5]
   CamArm[CameraArmOffset - spring-arm for ThirdPerson view]
-  TerrainData[DesertTerrainData - floor_y + mountain kill-spheres]
+  TerrainData[DesertTerrainData - floor_y + ellipsoid kill-zones for mountains dunes spires]
 
   SceneMgr[spawn_active_scene_system - reads MapCatalog for boundary]
   SS[Space Asteroids Scene - Saturn ring belt - 400k boundary]
@@ -48,8 +51,8 @@ graph TB
   PM[Player Movement + zone boundary reflection 70% damping]
   AC[Asteroid Collision]
   AM[Asteroid Movement]
-  TD[Terrain Death - floor + mountain kill-spheres]
-  UI[Menu UI]
+  TD[Terrain Death - floor + ellipsoid kill-zones]
+  UI[Menu UI - Resume/Settings/Commands/Exit - Commands panel shows all bindings]
   R[Main Camera / Player View]
   BP[Bloom + Cinematic Lighting]
   AL[Alien Ships - patrol + shoot - stats from EnemyCatalog]
@@ -62,6 +65,8 @@ graph TB
   JSON_SKINS --> DataLoader
   JSON_ENEMIES --> DataLoader
   JSON_LLM --> DataLoader
+  JSON_SECRETS --> DataLoader
+  JSON_KEYS --> KEYBINDS
   DataLoader --> SVGRast
   SVGRast --> SM
   DataLoader --> SceneMgr
@@ -70,6 +75,8 @@ graph TB
   Startup --> R
 
   GS_SM --> SM
+  GS_SM --> CHAT
+  SM -- AI Chat button --> CHAT
   SM -- Map chosen --> ActiveScene
   SM -- Skin chosen --> ShipSkin
   ActiveScene --> SceneMgr
@@ -94,7 +101,9 @@ graph TB
 
   M --> ML
   ML --> R
-  K --> PM
+  K --> KEYBINDS
+  KEYBINDS --> PM
+  KEYBINDS --> UI
   PM --> ZB
   ZB -- boundary bounce --> PM
   PM --> R

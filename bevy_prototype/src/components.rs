@@ -71,6 +71,16 @@ pub struct SensDecreaseButton;
 pub struct SettingsBackButton;
 
 #[derive(Component)]
+pub struct CommandsPanel;
+
+#[derive(Component)]
+pub struct CommandsBackButton;
+
+/// Text node showing the current rebind prompt / all keybindings.
+#[derive(Component)]
+pub struct CommandsStatusText;
+
+#[derive(Component)]
 pub struct SensitivityText;
 
 // These UI rebind components are reserved for future use.
@@ -185,6 +195,8 @@ pub struct PlayerShipModel;
 // ── In-game LLM / Copilot chat UI markers ────────────────────────────────────
 /// Root node of the chat overlay panel.
 #[derive(Component)] pub struct CopilotChatRoot;
+/// Full-screen transparent click blocker behind the chat panel.
+#[derive(Component)] pub struct CopilotChatBlocker;
 /// Scrolling conversation log text node.
 #[derive(Component)] pub struct CopilotChatLog;
 /// The text input box node.
@@ -195,5 +207,9 @@ pub struct PlayerShipModel;
 #[derive(Component)] pub struct CopilotSendButton;
 /// Save-last-JSON button (only visible when a JSON block was returned).
 #[derive(Component)] pub struct CopilotSaveButton;
+/// Button to re-enter the API key prompt at any time.
+#[derive(Component)] pub struct CopilotChangeKeyButton;
 /// Status / spinner text node.
 #[derive(Component)] pub struct CopilotStatusText;
+/// Copilot chat button shown in the start menu.
+#[derive(Component)] pub struct CopilotMenuButton;

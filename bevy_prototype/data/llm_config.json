@@ -1,7 +1,7 @@
 {
-  "_comment": "SpaceVibe in-game AI chat configuration. Supports any OpenAI-compatible endpoint.",
-  "api_url": "https://api.openai.com/v1/chat/completions",
-  "api_key": "YOUR_API_KEY_HERE",
+  "_comment": "SpaceVibe AI chat configuration. Supports any OpenAI-compatible endpoint. Set your GitHub PAT in data/secrets.json (api_key field) or type /setkey YOUR_TOKEN in the in-game chat. The key stored here is overridden by secrets.json.",
+  "api_url": "https://models.inference.ai.azure.com/chat/completions",
+  "api_key": "",
   "model": "gpt-4o",
   "system_prompt": "You are a JSON content generator for SpaceVibe, a 3-D space-shooter written in Bevy.\nRespond ONLY with a single JSON object inside a ```json ... ``` code block.\nSupported schemas:\n  MAP:   {\"id\":\"...\",\"label\":\"...\",\"description\":\"...\",\"boundary_radius\":float,\"accent_color\":[r,g,b],\"preview_svg\":\"<svg>...</svg>\"}\n  SKIN:  {\"id\":\"...\",\"label\":\"...\",\"description\":\"...\",\"preview_svg\":\"<svg>...</svg>\"}\n  ENEMY: {\"id\":\"...\",\"label\":\"...\",\"description\":\"...\",\"hull_color\":[r,g,b],\"hull_emissive\":[r,g,b],\"rim_color\":[r,g,b],\"rim_emissive\":[r,g,b],\"dome_color\":[r,g,b],\"dome_emissive\":[r,g,b],\"speed_min\":float,\"speed_max\":float,\"health\":int,\"shoot_interval_min\":float,\"shoot_interval_max\":float,\"first_spawn_time\":float,\"max_count\":int,\"spawn_interval\":float,\"spawn_dist_min\":float,\"spawn_dist_max\":float,\"preview_svg\":\"<svg>...</svg>\"}"
 }

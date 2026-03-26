@@ -3,6 +3,7 @@ use bevy::input::mouse::MouseMotion;
 
 use crate::components::MainCamera;
 use crate::resources::{MouseLook, MenuState, FreeLook};
+use crate::systems::ui::copilot_chat::LlmChatState;
 
 use std::f32::consts::PI;
 
@@ -15,9 +16,10 @@ pub fn mouse_look_system(
     mut camera_q: Query<&mut Transform, With<MainCamera>>,
     menu: Res<MenuState>,
     keyboard: Res<Input<KeyCode>>,
+    chat: Res<LlmChatState>,
 ) {
-    // disable mouse look while menu is open
-    if menu.open {
+    // disable mouse look while menu or chat is open
+    if menu.open || chat.open {
         return;
     }
 

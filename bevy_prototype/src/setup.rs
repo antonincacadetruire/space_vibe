@@ -52,6 +52,7 @@ pub fn setup(
             .into(),
             ..default()
         },
+        VisibilityBundle::default(),
         make_cinematic_bloom(),
         crate::components::MainCamera,
     ));

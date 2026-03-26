@@ -5,6 +5,7 @@ use crate::components::*;
 use crate::resources::{ActiveScene, DeathCause, GameState, GameTimer, KillCount, SceneKind, SceneLeaderboard, SpawnTransform, MouseLook, Throttle, TimePaused, PrevCameraPosition, MissileSpawnTimer, AlienSpawnTimer, ShipSkin};
 use crate::setup::resolve_ui_font_path;
 use crate::systems::data_loader::{CarouselState, MapCatalog, MapCatalogImages, SkinCatalog, SkinCatalogImages};
+use crate::systems::ui::copilot_chat::LlmChatState;
 
 // ── Shared style helpers (matching existing menu palette) ────────────────────
 fn hud_text_color() -> Color { Color::rgb(0.18, 0.95, 0.98) }
@@ -276,7 +277,7 @@ pub fn setup_start_menu(
                     row.spawn((
                         ButtonBundle {
                             style: Style {
-                                width: Val::Px(360.0),
+                                width: Val::Px(280.0),
                                 height: Val::Px(80.0),
                                 justify_content: JustifyContent::Center,
                                 align_items: AlignItems::Center,
@@ -291,6 +292,28 @@ pub fn setup_start_menu(
                         b.spawn(TextBundle::from_section(
                             "PLAY",
                             TextStyle { font: font.clone(), font_size: 34.0, color: hud_text_color() },
+                        ));
+                    });
+
+                    // COPILOT CHAT
+                    row.spawn((
+                        ButtonBundle {
+                            style: Style {
+                                width: Val::Px(240.0),
+                                height: Val::Px(80.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            background_color: btn_normal().into(),
+                            ..default()
+                        },
+                        CopilotMenuButton,
+                    ))
+                    .with_children(|b| {
+                        b.spawn(TextBundle::from_section(
+                            "AI Chat [F2]",
+                            TextStyle { font: font.clone(), font_size: 22.0, color: Color::rgb(0.20, 0.85, 0.95) },
                         ));
                     });
 
@@ -369,6 +392,7 @@ pub fn enter_playing(
     mut missile_timer: ResMut<MissileSpawnTimer>,
     mut alien_timer: ResMut<AlienSpawnTimer>,
     mut death_cause: ResMut<DeathCause>,
+    mut chat: ResMut<LlmChatState>,
     spawn_transform: Res<SpawnTransform>,
     mut camera_q: Query<&mut Transform, With<MainCamera>>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
@@ -381,6 +405,7 @@ pub fn enter_playing(
     missile_timer.0.reset();
     alien_timer.0.reset();
     *death_cause = DeathCause::default();
+    chat.open = false; // close chat panel when entering gameplay
     mouse_look.yaw = spawn_transform.yaw;
     mouse_look.pitch = spawn_transform.pitch;
     prev_cam.0 = spawn_transform.transform.translation;
@@ -502,16 +527,24 @@ pub fn start_menu_button_appearance_system(
 // ── Update – button action (start menu only) ─────────────────────────────────
 pub fn start_menu_button_system(
     mut q: Query<
-        (&Interaction, Option<&QuitButton>),
+        (&Interaction, Option<&QuitButton>, Option<&CopilotMenuButton>),
         (Changed<Interaction>, With<Button>),
     >,
-    mut _next_state: ResMut<NextState<GameState>>,
-    mut _active_scene: ResMut<ActiveScene>,
+    mut chat: ResMut<LlmChatState>,
 ) {
-    for (interaction, quit) in q.iter_mut() {
+    for (interaction, quit, copilot_btn) in q.iter_mut() {
         if *interaction == Interaction::Pressed {
+            // When chat is open, ignore all other button presses (blocker intercepts clicks,
+            // but guard here just in case).
+            if chat.open && quit.is_some() {
+                continue;
+            }
             if quit.is_some() {
                 std::process::exit(0);
+            }
+            if copilot_btn.is_some() {
+                // Just toggle the flag; llm_chat_toggle_system owns the Style sync.
+                chat.open = !chat.open;
             }
         }
     }
