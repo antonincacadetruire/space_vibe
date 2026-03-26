@@ -27,6 +27,19 @@ pub struct SkinDef {
     pub label: String,
     pub description: String,
     pub preview_svg: String,
+    /// 3-D ship shape preset: "sphere", "disc", "diamond", "organic", "cylinder"
+    /// Leave empty / omit to get the default war-plane style.
+    #[serde(default)]
+    pub shape: String,
+    /// Main hull colour [r, g, b] in 0.0–1.0 range.
+    #[serde(default)]
+    pub primary_color: Option<[f32; 3]>,
+    /// Accent / wing colour [r, g, b] in 0.0–1.0 range.
+    #[serde(default)]
+    pub secondary_color: Option<[f32; 3]>,
+    /// Engine-glow emissive colour [r, g, b] in 0.0–1.0 range.
+    #[serde(default)]
+    pub emissive_color: Option<[f32; 3]>,
 }
 
 // ── Bevy resources ─────────────────────────────────────────────────────────────
@@ -188,14 +201,21 @@ impl Default for LlmConfig {
             api_key: String::new(),
             model: "gpt-4o".into(),
             system_prompt: concat!(
-                "You are a JSON content generator for SpaceVibe, a 3-D space-shooter written in Bevy.\n",
-                "Respond ONLY with a single JSON object inside a ```json … ``` code block.\n",
-                "Supported schemas:\n",
-                "  MAP:   {\"id\":\"…\",\"label\":\"…\",\"description\":\"…\",\"boundary_radius\":float,\"accent_color\":[r,g,b],\"preview_svg\":\"<svg>…</svg>\"}\n",
-                "  SKIN:  {\"id\":\"…\",\"label\":\"…\",\"description\":\"…\",\"preview_svg\":\"<svg>…</svg>\"}\n",
-                "  ENEMY: {\"id\":\"…\",\"label\":\"…\",\"description\":\"…\",\"hull_color\":[r,g,b],\"hull_emissive\":[r,g,b],\"rim_color\":[r,g,b],\"rim_emissive\":[r,g,b],\"dome_color\":[r,g,b],\"dome_emissive\":[r,g,b],",
+                "You are SpaceVibe Copilot, an AI companion for a 3-D space-shooter game built with Bevy (Rust).\n",
+                "Chat freely with the player: answer questions, give flying tips, discuss lore, or just hang out.\n",
+                "Only when the player explicitly asks you to GENERATE or CREATE a map, skin, or enemy, ",
+                "respond with ONLY a single valid JSON object inside a ```json ... ``` code block, using one of these schemas:\n",
+                "  MAP:   {\"id\":\"...\",\"label\":\"...\",\"description\":\"...\",\"boundary_radius\":float,\"accent_color\":[r,g,b],\"preview_svg\":\"<svg>...</svg>\"}\n",
+                "  SKIN:  {\"id\":\"...\",\"label\":\"...\",\"description\":\"...\",",
+                "\"shape\":\"sphere|disc|diamond|organic|cylinder\",",
+                "\"primary_color\":[r,g,b],\"secondary_color\":[r,g,b],\"emissive_color\":[r,g,b],",
+                "\"preview_svg\":\"<svg>...</svg>\"}\n",
+                "  ENEMY: {\"id\":\"...\",\"label\":\"...\",\"description\":\"...\",\"hull_color\":[r,g,b],\"hull_emissive\":[r,g,b],\"rim_color\":[r,g,b],\"rim_emissive\":[r,g,b],\"dome_color\":[r,g,b],\"dome_emissive\":[r,g,b],",
                 "\"speed_min\":float,\"speed_max\":float,\"health\":int,\"shoot_interval_min\":float,\"shoot_interval_max\":float,",
-                "\"first_spawn_time\":float,\"max_count\":int,\"spawn_interval\":float,\"spawn_dist_min\":float,\"spawn_dist_max\":float,\"preview_svg\":\"<svg>…</svg>\"}"
+                "\"first_spawn_time\":float,\"max_count\":int,\"spawn_interval\":float,\"spawn_dist_min\":float,\"spawn_dist_max\":float,\"preview_svg\":\"<svg>...</svg>\"}\n",
+                "For SKIN, shape must be one of: sphere (round body like a planet/planetoid), disc (flat UFO-like), diamond (angular prism), organic (sphere with orbital rings), cylinder (elongated pod).\n",
+                "Colors are [r,g,b] floats in 0.0-1.0 range. Pick vivid, thematic colors.\n",
+                "For all other messages, reply in plain text only \u{2014} no JSON."
             ).into(),
         }
     }

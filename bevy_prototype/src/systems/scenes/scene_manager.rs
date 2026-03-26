@@ -1,11 +1,12 @@
 use bevy::prelude::*;
 
 use crate::components::SceneEntity;
-use crate::resources::{ActiveScene, MouseLook, PrevCameraPosition, SceneKind, SpawnTransform, ZoneBoundary};
+use crate::resources::{ActiveScene, IdfConfig, MouseLook, PrevCameraPosition, SceneKind, SpawnTransform, ZoneBoundary};
 use crate::systems::data_loader::MapCatalog;
 use super::space_scene::spawn_space_scene;
 use super::ice_caves::spawn_ice_caves_scene;
 use super::desert_planet::spawn_desert_planet_scene;
+use super::idf_transport::spawn_idf_transport_scene;
 
 /// Spawns the scene selected by the `ActiveScene` resource.
 /// Runs on OnEnter(Playing), before enter_playing, so SpawnTransform is ready.
@@ -19,6 +20,7 @@ pub fn spawn_active_scene_system(
     mut mouse_look: ResMut<MouseLook>,
     mut prev_cam:   ResMut<PrevCameraPosition>,
     map_catalog:   Res<MapCatalog>,
+    idf_config:    Res<IdfConfig>,
 ) {
     let mut rng = rand::thread_rng();
 
@@ -31,6 +33,9 @@ pub fn spawn_active_scene_system(
         ),
         SceneKind::DesertPlanet => spawn_desert_planet_scene(
             &mut commands, &mut meshes, &mut materials, &mut rng,
+        ),
+        SceneKind::IdfTransport => spawn_idf_transport_scene(
+            &mut commands, &mut meshes, &mut materials, &idf_config,
         ),
     };
 
@@ -45,6 +50,7 @@ pub fn spawn_active_scene_system(
         SceneKind::SpaceAsteroids => "space_asteroids",
         SceneKind::IceCaves       => "ice_caves",
         SceneKind::DesertPlanet   => "desert_planet",
+        SceneKind::IdfTransport   => "idf_transport",
     };
     let boundary_radius = map_catalog
         .by_id(map_id)
@@ -53,6 +59,7 @@ pub fn spawn_active_scene_system(
             SceneKind::SpaceAsteroids => 400_000.0,
             SceneKind::IceCaves       => 160_000.0,
             SceneKind::DesertPlanet   => 280_000.0,
+            SceneKind::IdfTransport   => 500_000.0,
         });
     commands.insert_resource(ZoneBoundary(boundary_radius));
 }

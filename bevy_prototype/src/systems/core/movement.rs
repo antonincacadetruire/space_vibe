@@ -1,13 +1,23 @@
 use bevy::prelude::*;
 
 use crate::components::{Asteroid, BeltAsteroid, MainCamera, Radius, Velocity, AngularVelocity};
-use crate::resources::{DeathCause, DesertTerrainData, Throttle, TimePaused, VelocityUpdates, MenuState, Keybindings, PrevCameraPosition, GameState, GameTimer, FreeLook, ZoneBoundary};
+use crate::resources::{DeathCause, DesertTerrainData, Throttle, SpeedMode, TimePaused, VelocityUpdates, MenuState, Keybindings, PrevCameraPosition, GameState, GameTimer, FreeLook, ZoneBoundary};
 use crate::systems::ui::copilot_chat::LlmChatState;
+
+/// Preset speed values (units/s) for the E/A tap system.
+const PRESET_SPEEDS: [f32; 3] = [5_000.0, 10_000.0, 15_000.0];
+/// Max speed when holding Z/S (units/s).
+const MANUAL_MAX_SPEED: f32 = 15_000.0;
+/// Time (seconds) to accelerate from 0 to MANUAL_MAX_SPEED while holding Z/S.
+const MANUAL_ACCEL_TIME: f32 = 1.5;
+/// Time (seconds) to coast from full speed to 0 after releasing Z/S.
+const COAST_DURATION: f32 = 3.5;
 
 pub fn player_movement_system(
     time: Res<Time>,
     mut camera_q: Query<&mut Transform, With<MainCamera>>,
     mut throttle: ResMut<Throttle>,
+    mut speed_mode: ResMut<SpeedMode>,
     mut paused: ResMut<TimePaused>,
     menu: Res<MenuState>,
     keyb: Res<Keybindings>,
@@ -29,14 +39,63 @@ pub fn player_movement_system(
     let Ok(mut transform) = camera_q.get_single_mut() else { return };
 
     let dt = time.delta_seconds();
-    // Support configurable keybindings; keep AZERTY fallback for throttle up
-    if keyboard.pressed(keyb.throttle_up) || keyboard.pressed(KeyCode::Z) || keyboard.pressed(KeyCode::Up) {
-        throttle.0 += 20_000.0 * dt;
+
+    // ── E / A preset taps ────────────────────────────────────────────────────
+    if keyboard.just_pressed(KeyCode::E) || keyboard.just_pressed(keyb.vertical_up) {
+        speed_mode.manual_active = false;
+        speed_mode.preset_step = (speed_mode.preset_step + 1).clamp(-3, 3);
+        if speed_mode.preset_step == 0 { speed_mode.preset_step = 1; }
     }
-    if keyboard.pressed(keyb.throttle_down) || keyboard.pressed(KeyCode::Down) {
-        throttle.0 -= 20_000.0 * dt;
+    if keyboard.just_pressed(KeyCode::A) || keyboard.just_pressed(keyb.vertical_down) {
+        speed_mode.manual_active = false;
+        speed_mode.preset_step = (speed_mode.preset_step - 1).clamp(-3, 3);
+        if speed_mode.preset_step == 0 { speed_mode.preset_step = -1; }
     }
-    throttle.0 = throttle.0.clamp(-50_000.0, 50_000.0);
+
+    // ── Z / S manual acceleration ────────────────────────────────────────────
+    let z_held = keyboard.pressed(keyb.throttle_up) || keyboard.pressed(KeyCode::Z) || keyboard.pressed(KeyCode::Up);
+    let s_held = keyboard.pressed(keyb.throttle_down) || keyboard.pressed(KeyCode::Down);
+
+    if z_held || s_held {
+        // Override preset mode
+        speed_mode.manual_active = true;
+        speed_mode.preset_step = 0;
+
+        let accel = MANUAL_MAX_SPEED / MANUAL_ACCEL_TIME;
+        if z_held {
+            speed_mode.manual_target = MANUAL_MAX_SPEED;
+            throttle.0 = (throttle.0 + accel * dt).min(MANUAL_MAX_SPEED);
+        }
+        if s_held {
+            speed_mode.manual_target = -MANUAL_MAX_SPEED;
+            throttle.0 = (throttle.0 - accel * dt).max(-MANUAL_MAX_SPEED);
+        }
+    } else if speed_mode.manual_active {
+        // Z/S released → coast to zero
+        let decel = throttle.0.abs() / COAST_DURATION.max(0.01);
+        let decel = decel.max(MANUAL_MAX_SPEED / COAST_DURATION); // minimum decel
+        if throttle.0 > 0.0 {
+            throttle.0 = (throttle.0 - decel * dt).max(0.0);
+        } else if throttle.0 < 0.0 {
+            throttle.0 = (throttle.0 + decel * dt).min(0.0);
+        }
+        if throttle.0.abs() < 10.0 {
+            throttle.0 = 0.0;
+            speed_mode.manual_active = false;
+        }
+    } else if speed_mode.preset_step != 0 {
+        // Smoothly approach preset speed
+        let idx = (speed_mode.preset_step.unsigned_abs() as usize).clamp(1, 3) - 1;
+        let target = PRESET_SPEEDS[idx] * speed_mode.preset_step.signum() as f32;
+        let approach_rate = MANUAL_MAX_SPEED / MANUAL_ACCEL_TIME;
+        if (target - throttle.0).abs() < approach_rate * dt {
+            throttle.0 = target;
+        } else if target > throttle.0 {
+            throttle.0 += approach_rate * dt;
+        } else {
+            throttle.0 -= approach_rate * dt;
+        }
+    }
 
     // When free-look is active use saved travel direction, not current camera rotation
     let travel_rotation = if free_look.active {
@@ -46,15 +105,7 @@ pub fn player_movement_system(
     };
     let forward = travel_rotation.mul_vec3(Vec3::NEG_Z).normalize_or_zero();
 
-    let vertical_up = keyboard.pressed(keyb.vertical_up);
-    let vertical_down = keyboard.pressed(keyb.vertical_down);
-    let vertical = match (vertical_up, vertical_down) {
-        (true, false) => 1.0,
-        (false, true) => -1.0,
-        _ => 0.0,
-    };
-
-    let movement = forward * throttle.0 * dt + Vec3::Y * crate::SHUTTLE_SPEED * vertical * dt;
+    let movement = forward * throttle.0 * dt;
     transform.translation += movement;
 
     // Boundary: push the player back inward but preserve speed (feels natural).

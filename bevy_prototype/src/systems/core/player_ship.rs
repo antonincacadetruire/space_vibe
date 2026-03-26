@@ -1,6 +1,17 @@
 use bevy::prelude::*;
+use bevy::input::mouse::MouseMotion;
 
 use crate::components::{MainCamera, PlayerShipModel, SceneEntity};
+use crate::resources::{CameraMode, GameState, TimePaused};
+use crate::systems::data_loader::SkinCatalog;
+use crate::systems::ui::copilot_chat::LlmChatState;
+
+/// Resource holding the current roll angle of the player ship (radians).
+#[derive(Resource, Default)]
+pub struct ShipRollState {
+    /// Current roll angle in radians — springs toward target and back to 0.
+    pub current_roll: f32,
+}
 
 /// Spawns a procedural war-plane model as a child of the main camera.
 /// The ship sits slightly in front of and below the camera so the player can
@@ -15,11 +26,12 @@ pub fn spawn_player_ship_system(
     mut materials: ResMut<Assets<StandardMaterial>>,
     camera_q: Query<Entity, With<MainCamera>>,
     ship_skin: Res<crate::resources::ShipSkin>,
-    cam_mode: Res<crate::resources::CameraMode>,
+    cam_mode: Res<CameraMode>,
+    skin_catalog: Res<SkinCatalog>,
 ) {
     let Ok(camera_entity) = camera_q.get_single() else { return };
     // Ship starts visible in ThirdPerson mode, hidden in FirstPerson.
-    let initial_vis = if *cam_mode == crate::resources::CameraMode::ThirdPerson {
+    let initial_vis = if *cam_mode == CameraMode::ThirdPerson {
         Visibility::Inherited
     } else {
         Visibility::Hidden
@@ -63,6 +75,60 @@ pub fn spawn_player_ship_system(
     // Ship root is at (0, -1.5, -10) in camera-local space, putting the tail
     // ~7 units ahead of the camera so the player always sees the whole aircraft.
 
+    // ── Custom (AI-generated) skins — build from SkinDef shape/color fields ─────
+    if let crate::resources::ShipSkin::Custom(ref skin_id) = *ship_skin {
+        let skin_def = skin_catalog.by_id(skin_id);
+        let shape_name = skin_def.map(|s| s.shape.as_str()).unwrap_or("sphere");
+        let hull_color = skin_def
+            .and_then(|s| s.primary_color)
+            .map(|[r, g, b]| Color::rgb(r, g, b))
+            .unwrap_or(Color::rgb(0.30, 0.50, 0.80));
+        let accent_color = skin_def
+            .and_then(|s| s.secondary_color)
+            .map(|[r, g, b]| Color::rgb(r, g, b))
+            .unwrap_or(Color::rgb(0.80, 0.30, 0.20));
+        let glow_color = skin_def
+            .and_then(|s| s.emissive_color)
+            .map(|[r, g, b]| Color::rgb(r, g, b))
+            .unwrap_or(Color::rgb(0.40, 1.00, 2.00));
+
+        let custom_hull = materials.add(StandardMaterial {
+            base_color: hull_color,
+            metallic: 0.70,
+            perceptual_roughness: 0.30,
+            ..default()
+        });
+        let custom_accent = materials.add(StandardMaterial {
+            base_color: accent_color,
+            metallic: 0.60,
+            perceptual_roughness: 0.40,
+            ..default()
+        });
+        let custom_glow = materials.add(StandardMaterial {
+            base_color: glow_color,
+            emissive: glow_color,
+            metallic: 0.00,
+            perceptual_roughness: 0.80,
+            ..default()
+        });
+
+        let custom_root = commands
+            .spawn((
+                SpatialBundle {
+                    visibility: initial_vis,
+                    transform: Transform::from_xyz(0.0, -1.5, -10.0),
+                    ..default()
+                },
+                PlayerShipModel,
+                SceneEntity,
+            ))
+            .id();
+
+        build_custom_ship(shape_name, custom_root, &mut commands, &mut meshes, custom_hull, custom_accent, custom_glow);
+        commands.entity(camera_entity).push_children(&[custom_root]);
+        return;
+    }
+
     // Currently only one skin available; keep structure for future variants
     let fuselage_mesh = match *ship_skin {
         crate::resources::ShipSkin::WarPlane => meshes.add(Mesh::from(shape::Box {
@@ -83,6 +149,7 @@ pub fn spawn_player_ship_system(
             min_y: -0.28, max_y: 0.28,
             min_z: -3.80, max_z: 2.50,
         })),
+        crate::resources::ShipSkin::Custom(_) => unreachable!(),
     };
 
     // ── Hierarchy ─────────────────────────────────────────────────────────────
@@ -214,8 +281,223 @@ pub fn spawn_player_ship_system(
             }).id();
             commands.entity(root).push_children(&[fuselage, spike, wings, abdomen, nozzle]);
         }
+
+        crate::resources::ShipSkin::Custom(_) => unreachable!(),
     }
 
     // Attach ship tree to the camera so it moves/rotates with it.
     commands.entity(camera_entity).push_children(&[root]);
+}
+
+// ── Custom ship builder ────────────────────────────────────────────────────────
+
+/// Build a procedural ship shape into `root` based on the skin's `shape` field.
+fn build_custom_ship(
+    shape: &str,
+    root: Entity,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    hull_mat: Handle<StandardMaterial>,
+    accent_mat: Handle<StandardMaterial>,
+    glow_mat: Handle<StandardMaterial>,
+) {
+    match shape {
+        "disc" | "ufo" => {
+            // Flat disc body + dome on top
+            let disc = commands.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Cylinder { radius: 1.8, height: 0.35, resolution: 16, segments: 1 })),
+                material: hull_mat,
+                ..default()
+            }).id();
+            let dome = commands.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::UVSphere { radius: 0.8, sectors: 12, stacks: 8 })),
+                material: accent_mat,
+                transform: Transform::from_xyz(0.0, 0.3, 0.0),
+                ..default()
+            }).id();
+            let eng_l = commands.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::UVSphere { radius: 0.22, sectors: 8, stacks: 5 })),
+                material: glow_mat.clone(),
+                transform: Transform::from_xyz(-0.8, -0.25, 0.0),
+                ..default()
+            }).id();
+            let eng_r = commands.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::UVSphere { radius: 0.22, sectors: 8, stacks: 5 })),
+                material: glow_mat,
+                transform: Transform::from_xyz(0.8, -0.25, 0.0),
+                ..default()
+            }).id();
+            commands.entity(root).push_children(&[disc, dome, eng_l, eng_r]);
+        }
+
+        "diamond" | "prism" => {
+            // Angular elongated fighter
+            let body = commands.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Box { min_x: -0.5, max_x: 0.5, min_y: -0.5, max_y: 0.5, min_z: -4.0, max_z: 2.5 })),
+                material: hull_mat,
+                ..default()
+            }).id();
+            let fin_l = commands.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Box { min_x: -3.5, max_x: 0.0, min_y: -0.08, max_y: 0.08, min_z: -0.5, max_z: 1.8 })),
+                material: accent_mat.clone(),
+                ..default()
+            }).id();
+            let fin_r = commands.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Box { min_x: 0.0, max_x: 3.5, min_y: -0.08, max_y: 0.08, min_z: -0.5, max_z: 1.8 })),
+                material: accent_mat,
+                ..default()
+            }).id();
+            let nozzle = commands.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::UVSphere { radius: 0.35, sectors: 8, stacks: 5 })),
+                material: glow_mat,
+                transform: Transform::from_xyz(0.0, 0.0, 2.5),
+                ..default()
+            }).id();
+            commands.entity(root).push_children(&[body, fin_l, fin_r, nozzle]);
+        }
+
+        "organic" | "flower" => {
+            // Round core with two orbital rings (like a planet/flower)
+            let core = commands.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::UVSphere { radius: 1.0, sectors: 16, stacks: 10 })),
+                material: hull_mat,
+                ..default()
+            }).id();
+            let ring1 = commands.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Torus {
+                    radius: 1.6,
+                    ring_radius: 0.18,
+                    subdivisions_segments: 24,
+                    subdivisions_sides: 6,
+                })),
+                material: accent_mat.clone(),
+                ..default()
+            }).id();
+            let ring2 = commands.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Torus {
+                    radius: 1.6,
+                    ring_radius: 0.14,
+                    subdivisions_segments: 24,
+                    subdivisions_sides: 6,
+                })),
+                material: accent_mat,
+                transform: Transform::from_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                ..default()
+            }).id();
+            let nozzle = commands.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::UVSphere { radius: 0.3, sectors: 8, stacks: 5 })),
+                material: glow_mat,
+                transform: Transform::from_xyz(0.0, 0.0, 1.1),
+                ..default()
+            }).id();
+            commands.entity(root).push_children(&[core, ring1, ring2, nozzle]);
+        }
+
+        "cylinder" | "pod" => {
+            // Elongated capsule pod
+            let body = commands.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Capsule {
+                    radius: 0.5,
+                    rings: 4,
+                    depth: 4.5,
+                    latitudes: 8,
+                    longitudes: 8,
+                    uv_profile: shape::CapsuleUvProfile::Uniform,
+                })),
+                material: hull_mat,
+                transform: Transform::from_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                ..default()
+            }).id();
+            let fin_top = commands.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Box { min_x: -0.08, max_x: 0.08, min_y: 0.45, max_y: 1.6, min_z: -0.5, max_z: 0.8 })),
+                material: accent_mat.clone(),
+                ..default()
+            }).id();
+            let fin_l = commands.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Box { min_x: -1.6, max_x: -0.45, min_y: -0.08, max_y: 0.08, min_z: -0.5, max_z: 0.8 })),
+                material: accent_mat,
+                ..default()
+            }).id();
+            let nozzle = commands.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::UVSphere { radius: 0.28, sectors: 8, stacks: 5 })),
+                material: glow_mat,
+                transform: Transform::from_xyz(0.0, 0.0, 2.5),
+                ..default()
+            }).id();
+            commands.entity(root).push_children(&[body, fin_top, fin_l, nozzle]);
+        }
+
+        _ => {
+            // Default "sphere" — generic round spacecraft
+            let sphere = commands.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::UVSphere { radius: 0.9, sectors: 16, stacks: 10 })),
+                material: hull_mat,
+                ..default()
+            }).id();
+            let ring = commands.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Torus {
+                    radius: 1.5,
+                    ring_radius: 0.22,
+                    subdivisions_segments: 24,
+                    subdivisions_sides: 6,
+                })),
+                material: accent_mat,
+                transform: Transform::from_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_4)),
+                ..default()
+            }).id();
+            let nozzle_l = commands.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::UVSphere { radius: 0.25, sectors: 8, stacks: 5 })),
+                material: glow_mat.clone(),
+                transform: Transform::from_xyz(-0.4, 0.0, 0.9),
+                ..default()
+            }).id();
+            let nozzle_r = commands.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::UVSphere { radius: 0.25, sectors: 8, stacks: 5 })),
+                material: glow_mat,
+                transform: Transform::from_xyz(0.4, 0.0, 0.9),
+                ..default()
+            }).id();
+            commands.entity(root).push_children(&[sphere, ring, nozzle_l, nozzle_r]);
+        }
+    }
+}
+
+// ── Ship bank / roll animation ─────────────────────────────────────────────────
+
+/// Applies a banking roll to the `PlayerShipModel` proportional to yaw input,
+/// giving a realistic in-flight inclination in third-person view.
+pub fn ship_bank_system(
+    mut mouse_motion: EventReader<MouseMotion>,
+    mut roll: ResMut<ShipRollState>,
+    mut ship_q: Query<&mut Transform, With<PlayerShipModel>>,
+    time: Res<Time>,
+    chat: Res<LlmChatState>,
+    paused: Res<TimePaused>,
+    cam_mode: Res<CameraMode>,
+    state: Res<State<GameState>>,
+) {
+    if paused.0 || chat.open || *state.get() != GameState::Playing { return; }
+    if *cam_mode != CameraMode::ThirdPerson { return; }
+
+    let dt = time.delta_seconds();
+
+    // Sum all mouse X deltas this frame to get yaw input magnitude
+    let total_dx: f32 = mouse_motion.iter().map(|e| e.delta.x).sum();
+
+    // Target roll proportional to yaw input, capped at ~40 degrees
+    let target_roll = (-total_dx * 0.025).clamp(-0.70, 0.70);
+
+    // Spring-damper: smoothly approach target
+    let spring = 9.0;
+    roll.current_roll += (target_roll - roll.current_roll) * (spring * dt).min(1.0);
+
+    // Fade back to 0 when no input
+    if total_dx.abs() < 0.5 {
+        let fade = 3.5;
+        roll.current_roll *= 1.0 - (fade * dt).min(1.0);
+    }
+
+    for mut transform in &mut ship_q {
+        transform.rotation = Quat::from_rotation_z(-roll.current_roll);
+    }
 }

@@ -18,6 +18,7 @@ pub enum SceneKind {
     SpaceAsteroids,
     IceCaves,
     DesertPlanet,
+    IdfTransport,
 }
 
 impl SceneKind {
@@ -26,6 +27,7 @@ impl SceneKind {
             SceneKind::SpaceAsteroids => "Asteroid Field",
             SceneKind::IceCaves      => "Ice Caves",
             SceneKind::DesertPlanet  => "Desert Planet",
+            SceneKind::IdfTransport  => "\u{00ce}le-de-France",
         }
     }
     pub fn file_key(&self) -> &'static str {
@@ -33,6 +35,7 @@ impl SceneKind {
             SceneKind::SpaceAsteroids => "space",
             SceneKind::IceCaves      => "ice",
             SceneKind::DesertPlanet  => "desert",
+            SceneKind::IdfTransport  => "idf",
         }
     }
 }
@@ -341,6 +344,23 @@ pub struct VelocityUpdates(pub HashMap<Entity, Vec3>);
 #[derive(Resource)]
 pub struct Throttle(pub f32);
 
+/// Tracks the movement mode for the new Z/S (manual accel) + E/A (preset speed) system.
+#[derive(Resource)]
+pub struct SpeedMode {
+    /// Current preset step: 0 = off, 1/2/3 = 5000/10000/15000 forward; -1/-2/-3 = reverse.
+    pub preset_step: i32,
+    /// True while Z or S is actively held → overrides preset.
+    pub manual_active: bool,
+    /// Target speed from manual input (positive for forward, negative for reverse).
+    pub manual_target: f32,
+}
+
+impl Default for SpeedMode {
+    fn default() -> Self {
+        Self { preset_step: 0, manual_active: false, manual_target: 0.0 }
+    }
+}
+
 #[derive(Resource, Default)]
 pub struct PrevCameraPosition(pub Vec3);
 
@@ -353,6 +373,13 @@ pub struct FreeLook {
     pub travel_yaw: f32,
     pub travel_pitch: f32,
     pub active: bool,
+    /// World-space point to orbit around when in ThirdPerson + C held.
+    /// Set to Some(ship_world_pos) when C is first pressed.
+    pub orbit_center: Option<Vec3>,
+    /// Orbit yaw angle (radians) used while ThirdPerson orbiting.
+    pub orbit_yaw: f32,
+    /// Orbit pitch angle (radians) used while ThirdPerson orbiting.
+    pub orbit_pitch: f32,
 }
 
 // ── Missile spawn timer ───────────────────────────────────────────────────────
@@ -379,6 +406,8 @@ pub enum ShipSkin {
     WarPlane,
     Banana,
     Mosquito,
+    /// Any AI-generated or custom skin identified by its JSON `id` field.
+    Custom(String),
 }
 
 // ── Maximum distance the player may travel from the scene origin ──────────────
@@ -409,11 +438,12 @@ pub struct CameraArmOffset(pub Vec3);
 
 #[allow(dead_code)]
 impl ShipSkin {
-    pub fn label(&self) -> &'static str {
+    pub fn label(&self) -> String {
         match self {
-            ShipSkin::WarPlane => "War Plane",
-            ShipSkin::Banana   => "Banana",
-            ShipSkin::Mosquito => "Mosquito",
+            ShipSkin::WarPlane      => "War Plane".to_owned(),
+            ShipSkin::Banana        => "Banana".to_owned(),
+            ShipSkin::Mosquito      => "Mosquito".to_owned(),
+            ShipSkin::Custom(id)    => id.clone(),
         }
     }
 
@@ -421,13 +451,54 @@ impl ShipSkin {
         &[ShipSkin::WarPlane, ShipSkin::Banana, ShipSkin::Mosquito]
     }
 
-    pub fn id(&self) -> &'static str {
+    pub fn id(&self) -> String {
         match self {
-            ShipSkin::WarPlane => "war_plane",
-            ShipSkin::Banana   => "banana",
-            ShipSkin::Mosquito => "mosquito",
+            ShipSkin::WarPlane      => "war_plane".to_owned(),
+            ShipSkin::Banana        => "banana".to_owned(),
+            ShipSkin::Mosquito      => "mosquito".to_owned(),
+            ShipSkin::Custom(id)    => id.clone(),
         }
     }
+}
+
+// ── Île-de-France transport map configuration ─────────────────────────────────
+
+/// Static definition of a transit line known to SpaceVibe.
+#[derive(Debug, Clone)]
+pub struct IdfLineDef {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub color: [f32; 3],
+}
+
+/// Static definition of a station the player can select.
+#[derive(Debug, Clone)]
+pub struct IdfStationDef {
+    pub id: &'static str,
+    /// Display name.
+    pub label: &'static str,
+    /// IDF Mobilités logical stop code (used for PRIM API).
+    pub prim_id: &'static str,
+    /// Lines served by this station.
+    pub lines: &'static [&'static str],
+    /// Approximate world-space position in the IDF map (units = ~100m).
+    pub pos: [f32; 3],
+}
+
+/// Which stations the player has selected to be tracked + attacked.
+#[derive(Resource, Default, Clone)]
+pub struct IdfConfig {
+    /// Indices into `IDF_STATIONS` that are selected.
+    pub selected_stations: Vec<usize>,
+}
+
+/// Cached next-departure strings fetched from PRIM API, keyed by station prim_id.
+#[derive(Resource, Default, Clone)]
+pub struct IdfNextTrains {
+    /// keyed: prim_id → vec of display strings like "M14 → Olympiades : 2 min"
+    pub departures: std::collections::HashMap<String, Vec<String>>,
+    /// Arc<Mutex<>> slot written by background fetch thread.
+    pub pending: Option<std::sync::Arc<std::sync::Mutex<Option<std::collections::HashMap<String, Vec<String>>>>>>,
 }
 
 // ── Desert terrain kill data ──────────────────────────────────────────────────

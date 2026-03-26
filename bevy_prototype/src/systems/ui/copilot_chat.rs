@@ -23,8 +23,9 @@ use crate::components::{
     CopilotSendButton, CopilotSaveButton, CopilotChangeKeyButton, CopilotStatusText,
 };
 use crate::resources::GameState;
+use crate::resources::TimePaused;
 use crate::setup::resolve_ui_font_path;
-use crate::systems::data_loader::LlmConfigResource;
+use crate::systems::data_loader::{LlmConfigResource, MapCatalog, MapCatalogImages, SkinCatalog, SkinCatalogImages, svg_to_image, CarouselState};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -90,6 +91,11 @@ pub struct LlmChatState {
     pub last_json: Option<String>,
     /// When true, the next submitted text is treated as an API key, not a chat message.
     pub awaiting_api_key: bool,
+    /// Whether the game was already paused before the chat was opened (so we
+    /// don't accidentally un-pause when the user closes the chat).
+    pub was_paused_before_chat: bool,
+    /// Scroll offset: how many messages from the END to skip (0 = show latest).
+    pub scroll_offset: usize,
 }
 
 impl LlmChatState {
@@ -463,6 +469,7 @@ pub fn llm_chat_toggle_system(
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
     game_state: Res<State<GameState>>,
     llm_cfg: Res<LlmConfigResource>,
+    mut paused: ResMut<TimePaused>,
 ) {
     let state = game_state.get();
     if *state != GameState::Playing && *state != GameState::StartMenu {
@@ -471,17 +478,22 @@ pub fn llm_chat_toggle_system(
 
     if keys.just_pressed(KeyCode::F2) {
         chat.open = !chat.open;
-        // cursor management only in Playing state
+        // cursor + pause management only in Playing state
         if *state == GameState::Playing {
             if let Ok(mut win) = windows.get_single_mut() {
                 if chat.open {
                     win.cursor.visible = true;
                     win.cursor.grab_mode = CursorGrabMode::None;
                     win.cursor.icon = CursorIcon::Text;
+                    // Save current pause state then force-pause the game
+                    chat.was_paused_before_chat = paused.0;
+                    paused.0 = true;
                 } else {
                     win.cursor.visible = false;
                     win.cursor.grab_mode = CursorGrabMode::Locked;
                     win.cursor.icon = CursorIcon::Default;
+                    // Restore previous pause state when closing chat
+                    paused.0 = chat.was_paused_before_chat;
                 }
             }
         }
@@ -572,6 +584,7 @@ pub fn llm_chat_input_system(
     if should_send && !chat.input_buffer.is_empty() {
         let prompt = chat.input_buffer.trim().to_owned();
         chat.input_buffer.clear();
+        chat.scroll_offset = 0; // jump to bottom on send
 
         // ── API key prompt mode ────────────────────────────────────────────
         if chat.awaiting_api_key {
@@ -682,18 +695,25 @@ pub fn llm_chat_poll_system(
         style.display = save_display;
     }
 
-    // Rebuild conversation log text
+    // Rebuild conversation log text (respecting scroll_offset)
     let font = asset_server.load(resolve_ui_font_path());
     {
         let mut log_q = text_queries.p0();
         if let Ok(mut log_text) = log_q.get_single_mut() {
             if chat.conversation.is_empty() {
                 log_text.sections = vec![TextSection::new(
-                    "[Ask me to generate a map, skin or enemy – e.g. \"generate a toxic gas planet map\"]\n",
+                    "[Ask me anything – e.g. \"generate a toxic gas planet map\"\n or just chat! Scroll: mouse wheel]\n",
                     TextStyle { font: font.clone(), font_size: 13.0, color: Color::rgba(0.55, 0.75, 0.80, 0.55) },
                 )];
             } else {
-                log_text.sections = chat.conversation.iter().map(|msg| {
+                // Show at most MAX_VISIBLE messages from the end, offset by scroll_offset
+                const MAX_VISIBLE: usize = 20;
+                let total = chat.conversation.len();
+                let skip = chat.scroll_offset.min(total.saturating_sub(1));
+                let end = total.saturating_sub(skip);
+                let start = end.saturating_sub(MAX_VISIBLE);
+
+                let mut sections: Vec<TextSection> = chat.conversation[start..end].iter().map(|msg| {
                     let (prefix, color) = if msg.is_user {
                         ("You: ", Color::rgb(0.35, 0.88, 0.55))
                     } else {
@@ -704,18 +724,54 @@ pub fn llm_chat_poll_system(
                         TextStyle { font: font.clone(), font_size: 13.0, color },
                     )
                 }).collect();
+
+                // Scroll indicator line at top if we're scrolled up
+                if skip > 0 {
+                    sections.insert(0, TextSection::new(
+                        format!("↑ {} more above (scroll to read) ↑\n", total.saturating_sub(end)),
+                        TextStyle { font: font.clone(), font_size: 11.0, color: Color::rgba(0.70, 0.70, 0.40, 0.70) },
+                    ));
+                }
+                log_text.sections = sections;
             }
         }
     }
 }
 
-// ── Save button system ─────────────────────────────────────────────────────────
+// ── Chat scroll system ────────────────────────────────────────────────────────
 
+pub fn llm_chat_scroll_system(
+    mut chat: ResMut<LlmChatState>,
+    mut scroll_evts: EventReader<bevy::input::mouse::MouseWheel>,
+) {
+    if !chat.open { return; }
+    for ev in scroll_evts.iter() {
+        let delta = match ev.unit {
+            bevy::input::mouse::MouseScrollUnit::Line => ev.y as i32,
+            bevy::input::mouse::MouseScrollUnit::Pixel => (ev.y / 40.0) as i32,
+        };
+        let total = chat.conversation.len();
+        // Scroll up (positive delta) → increase scroll_offset (show older msgs)
+        // Scroll down (negative delta) → decrease scroll_offset (show newer msgs)
+        let new_offset = (chat.scroll_offset as i32 - delta)
+            .max(0)
+            .min((total as i32).saturating_sub(1)) as usize;
+        chat.scroll_offset = new_offset;
+    }
+}
+
+// ── Save button system ─────────────────────────────────────────────────────────
 pub fn llm_chat_save_system(
     mut chat: ResMut<LlmChatState>,
     interaction_q: Query<&Interaction, (Changed<Interaction>, With<CopilotSaveButton>)>,
     change_key_q: Query<&Interaction, (Changed<Interaction>, With<CopilotChangeKeyButton>)>,
     mut status_q: Query<&mut Text, (With<CopilotStatusText>, Without<CopilotChatLog>, Without<CopilotInputText>)>,
+    mut map_catalog: ResMut<MapCatalog>,
+    mut map_images: ResMut<MapCatalogImages>,
+    mut skin_catalog: ResMut<SkinCatalog>,
+    mut skin_images: ResMut<SkinCatalogImages>,
+    mut images: ResMut<Assets<Image>>,
+    mut carousel_state: ResMut<CarouselState>,
 ) {
     // ── Change Key button
     for interaction in &change_key_q {
@@ -729,7 +785,29 @@ pub fn llm_chat_save_system(
             let kind = infer_kind(json);
             match save_json(json, kind) {
                 Ok(path) => {
-                    let msg = format!("Saved to {path}");
+                    // Live-reload the matching catalog so the carousel reflects the new entry immediately.
+                    match kind {
+                        "maps" => {
+                            *map_catalog = MapCatalog::load();
+                            map_images.handles = map_catalog.maps.iter()
+                                .map(|m| images.add(svg_to_image(&m.preview_svg, 128, 128)))
+                                .collect();
+                            // Jump carousel to the newly added map (last entry after sort).
+                            carousel_state.map_idx = map_catalog.maps.len().saturating_sub(1);
+                        }
+                        "skins" => {
+                            *skin_catalog = SkinCatalog::load();
+                            skin_images.handles = skin_catalog.skins.iter()
+                                .map(|s| images.add(svg_to_image(&s.preview_svg, 128, 128)))
+                                .collect();
+                            carousel_state.skin_idx = skin_catalog.skins.len().saturating_sub(1);
+                        }
+                        _ => {}
+                    }
+                    let msg = format!(
+                        "Saved to {path}{}" ,
+                        if kind == "maps" || kind == "skins" { "\n✨ Added to the start-menu carousel!" } else { "" }
+                    );
                     chat.add_ai(&msg);
                     chat.last_json = None;
                     if let Ok(mut t) = status_q.get_single_mut() {

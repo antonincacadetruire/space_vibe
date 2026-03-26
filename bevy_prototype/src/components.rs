@@ -213,3 +213,17 @@ pub struct PlayerShipModel;
 #[derive(Component)] pub struct CopilotStatusText;
 /// Copilot chat button shown in the start menu.
 #[derive(Component)] pub struct CopilotMenuButton;
+
+// ── IDF station selection dropdown UI ────────────────────────────────────────
+/// Root node for the station picker panel (visible only when IDF map selected).
+#[derive(Component)] pub struct IdfStationPickerRoot;
+/// Collapse / expand toggle button at the top of the picker.
+#[derive(Component)] pub struct IdfPickerHeaderBtn;
+/// The "▼ STATIONS" / "▶ STATIONS" text on the header button.
+#[derive(Component)] pub struct IdfPickerHeaderText;
+/// Inner scrollable container that holds all station toggle buttons.
+#[derive(Component)] pub struct IdfPickerScrollContent;
+/// A toggle button for a single station in the picker list.
+#[derive(Component)] pub struct IdfStationToggleBtn { pub station_idx: usize }
+/// Text label inside each station toggle button.
+#[derive(Component)] pub struct IdfStationToggleText { pub station_idx: usize }

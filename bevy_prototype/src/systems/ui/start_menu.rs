@@ -2,10 +2,33 @@ use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, Window, CursorGrabMode, CursorIcon};
 
 use crate::components::*;
-use crate::resources::{ActiveScene, DeathCause, GameState, GameTimer, KillCount, SceneKind, SceneLeaderboard, SpawnTransform, MouseLook, Throttle, TimePaused, PrevCameraPosition, MissileSpawnTimer, AlienSpawnTimer, ShipSkin};
+use crate::resources::{ActiveScene, DeathCause, GameState, GameTimer, IdfConfig, KillCount, SceneKind, SceneLeaderboard, SpawnTransform, MouseLook, Throttle, TimePaused, PrevCameraPosition, MissileSpawnTimer, AlienSpawnTimer, ShipSkin};
 use crate::setup::resolve_ui_font_path;
 use crate::systems::data_loader::{CarouselState, MapCatalog, MapCatalogImages, SkinCatalog, SkinCatalogImages};
 use crate::systems::ui::copilot_chat::LlmChatState;
+use crate::systems::scenes::idf_transport::IDF_STATIONS;
+
+/// Return indices of notable hub stations shown in the UI picker.
+fn idf_picker_hub_indices() -> Vec<usize> {
+    const HUB_NAMES: &[&str] = &[
+        "Châtelet–Les Halles", "Gare du Nord", "Gare de Lyon",
+        "La Défense", "Saint-Lazare", "Nation", "République",
+        "Montparnasse–Bienvenüe", "Bastille", "Denfert-Rochereau",
+        "Charles-de-Gaulle–Étoile", "Opéra", "Place d'Italie",
+        "Trocadéro", "Invalides", "Auber / Opéra",
+        "CDG Terminal 2", "Massy-Palaiseau", "Place de Clichy",
+        "Strasbourg–Saint-Denis", "Bercy", "Gare d'Austerlitz",
+        "Concorde", "Pigalle", "Belleville",
+    ];
+    let mut indices = Vec::new();
+    let mut seen_names = std::collections::HashSet::new();
+    for (i, s) in IDF_STATIONS.iter().enumerate() {
+        if HUB_NAMES.contains(&s.1) && seen_names.insert(s.1) {
+            indices.push(i);
+        }
+    }
+    indices
+}
 
 // ── Shared style helpers (matching existing menu palette) ────────────────────
 fn hud_text_color() -> Color { Color::rgb(0.18, 0.95, 0.98) }
@@ -51,6 +74,7 @@ pub fn setup_start_menu(
     carousel_state: Res<CarouselState>,
     map_images: Res<MapCatalogImages>,
     skin_images: Res<SkinCatalogImages>,
+    idf_config: Res<IdfConfig>,
 ) {
     if let Ok(mut window) = windows.get_single_mut() {
         window.cursor.visible = true;
@@ -88,6 +112,7 @@ pub fn setup_start_menu(
             let scene = match m.id.as_str() {
                 "ice_caves"     => SceneKind::IceCaves,
                 "desert_planet" => SceneKind::DesertPlanet,
+                "idf_transport" => SceneKind::IdfTransport,
                 _               => SceneKind::SpaceAsteroids,
             };
             (m.label.clone(), m.description.clone(), scene)
@@ -262,6 +287,115 @@ pub fn setup_start_menu(
                     ..default()
                 });
 
+                // ── IDF Station Picker (visible only when IDF map selected) ──
+                let show_picker = matches!(map_scene, SceneKind::IdfTransport);
+                panel.spawn((
+                    NodeBundle {
+                        style: Style {
+                            width: Val::Px(800.0),
+                            flex_direction: FlexDirection::Column,
+                            display: if show_picker { Display::Flex } else { Display::None },
+                            ..default()
+                        },
+                        ..default()
+                    },
+                    IdfStationPickerRoot,
+                ))
+                .with_children(|picker| {
+                    // ── Collapsible header button ────────────────────────────
+                    picker.spawn((
+                        ButtonBundle {
+                            style: Style {
+                                width: Val::Px(800.0),
+                                height: Val::Px(30.0),
+                                justify_content: JustifyContent::FlexStart,
+                                align_items: AlignItems::Center,
+                                padding: UiRect::horizontal(Val::Px(10.0)),
+                                ..default()
+                            },
+                            background_color: Color::rgb(0.04, 0.14, 0.16).into(),
+                            ..default()
+                        },
+                        IdfPickerHeaderBtn,
+                    ))
+                    .with_children(|hdr| {
+                        hdr.spawn((
+                            TextBundle::from_section(
+                                "▼  Select stations to track  (click to collapse)",
+                                TextStyle { font: font.clone(), font_size: 14.0, color: Color::rgb(0.40, 0.75, 0.80) },
+                            ),
+                            IdfPickerHeaderText,
+                        ));
+                    });
+
+                    // ── Scrollable content area ─────────────────────────────
+                    picker.spawn((
+                        NodeBundle {
+                            style: Style {
+                                width: Val::Px(800.0),
+                                max_height: Val::Px(180.0),
+                                flex_direction: FlexDirection::Column,
+                                overflow: Overflow::clip_y(),
+                                ..default()
+                            },
+                            background_color: Color::rgba(0.02, 0.06, 0.10, 0.8).into(),
+                            ..default()
+                        },
+                        IdfPickerScrollContent,
+                    ))
+                    .with_children(|scroll_area| {
+                        // Inner content node — its `top` is adjusted by scroll system
+                        scroll_area.spawn(NodeBundle {
+                            style: Style {
+                                width: Val::Percent(100.0),
+                                flex_direction: FlexDirection::Column,
+                                row_gap: Val::Px(2.0),
+                                padding: UiRect::all(Val::Px(4.0)),
+                                ..default()
+                            },
+                            ..default()
+                        }).with_children(|inner| {
+                            let hub_stations = idf_picker_hub_indices();
+                            let all_selected = idf_config.selected_stations.is_empty();
+                            for &idx in &hub_stations {
+                                if let Some(s) = IDF_STATIONS.get(idx) {
+                                    let is_on = all_selected || idf_config.selected_stations.contains(&idx);
+                                    let label_text = format!("{} {}", if is_on { "●" } else { "○" }, s.1);
+                                    inner.spawn((
+                                        ButtonBundle {
+                                            style: Style {
+                                                width: Val::Px(780.0),
+                                                min_height: Val::Px(28.0),
+                                                justify_content: JustifyContent::FlexStart,
+                                                align_items: AlignItems::Center,
+                                                padding: UiRect::horizontal(Val::Px(8.0)),
+                                                flex_shrink: 0.0,
+                                                ..default()
+                                            },
+                                            background_color: if is_on {
+                                                Color::rgb(0.06, 0.20, 0.22)
+                                            } else {
+                                                Color::rgb(0.03, 0.08, 0.10)
+                                            }.into(),
+                                            ..default()
+                                        },
+                                        IdfStationToggleBtn { station_idx: idx },
+                                    ))
+                                    .with_children(|b| {
+                                        b.spawn((
+                                            TextBundle::from_section(
+                                                label_text,
+                                                TextStyle { font: font.clone(), font_size: 13.0, color: Color::rgb(0.70, 0.90, 0.92) },
+                                            ),
+                                            IdfStationToggleText { station_idx: idx },
+                                        ));
+                                    });
+                                }
+                            }
+                        });
+                    });
+                });
+
                 // ── Action buttons ───────────────────────────────────────────
                 panel.spawn(NodeBundle {
                     style: Style {
@@ -393,6 +527,8 @@ pub fn enter_playing(
     mut alien_timer: ResMut<AlienSpawnTimer>,
     mut death_cause: ResMut<DeathCause>,
     mut chat: ResMut<LlmChatState>,
+    mut idf_config: ResMut<IdfConfig>,
+    active_scene: Res<ActiveScene>,
     spawn_transform: Res<SpawnTransform>,
     mut camera_q: Query<&mut Transform, With<MainCamera>>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
@@ -406,6 +542,13 @@ pub fn enter_playing(
     alien_timer.0.reset();
     *death_cause = DeathCause::default();
     chat.open = false; // close chat panel when entering gameplay
+    // Auto-select all stations when entering IDF map
+    if let SceneKind::IdfTransport = &active_scene.0 {
+        if idf_config.selected_stations.is_empty() {
+            let count = crate::systems::scenes::idf_transport::IDF_STATIONS.len();
+            idf_config.selected_stations = (0..count).collect();
+        }
+    }
     mouse_look.yaw = spawn_transform.yaw;
     mouse_look.pitch = spawn_transform.pitch;
     prev_cam.0 = spawn_transform.transform.translation;
@@ -578,6 +721,7 @@ pub fn start_menu_carousel_system(
         Query<&mut UiImage, With<MapPreviewImage>>,
     )>,
     mut next_state: ResMut<NextState<GameState>>,
+    mut picker_q: Query<&mut Style, With<IdfStationPickerRoot>>,
 ) {
     let skin_count = skin_catalog.skins.len().max(1);
     let map_count  = map_catalog.maps.len().max(1);
@@ -619,9 +763,11 @@ pub fn start_menu_carousel_system(
     if skin_changed {
         let idx = carousel_state.skin_idx;
         *ship_skin = match skin_catalog.skins.get(idx).map(|s| s.id.as_str()) {
-            Some("banana")   => ShipSkin::Banana,
-            Some("mosquito") => ShipSkin::Mosquito,
-            _                => ShipSkin::WarPlane,
+            Some("banana")    => ShipSkin::Banana,
+            Some("mosquito")  => ShipSkin::Mosquito,
+            Some("war_plane") => ShipSkin::WarPlane,
+            Some(id)          => ShipSkin::Custom(id.to_owned()),
+            None              => ShipSkin::WarPlane,
         };
         if let Some(s) = skin_catalog.skins.get(idx) {
             let label = s.label.clone();
@@ -641,6 +787,7 @@ pub fn start_menu_carousel_system(
             let scene = match m.id.as_str() {
                 "ice_caves"     => SceneKind::IceCaves,
                 "desert_planet" => SceneKind::DesertPlanet,
+                "idf_transport" => SceneKind::IdfTransport,
                 _               => SceneKind::SpaceAsteroids,
             };
             active_scene.0 = scene.clone();
@@ -665,10 +812,183 @@ pub fn start_menu_carousel_system(
             let h = handle.clone();
             for mut img in img_q.p1().iter_mut() { img.texture = h.clone(); }
         }
+
+        // Show/hide IDF station picker
+        let is_idf = active_scene.0 == SceneKind::IdfTransport;
+        for mut style in picker_q.iter_mut() {
+            style.display = if is_idf { Display::Flex } else { Display::None };
+        }
+    }
+}
+
+// ── Update – live carousel refresh when catalog reloaded by AI chat ───────────
+pub fn catalog_refresh_system(
+    map_catalog: Res<MapCatalog>,
+    skin_catalog: Res<SkinCatalog>,
+    map_images: Res<MapCatalogImages>,
+    skin_images: Res<SkinCatalogImages>,
+    carousel_state: Res<CarouselState>,
+    leaderboard: Res<SceneLeaderboard>,
+    mut active_scene: ResMut<ActiveScene>,
+    mut text_q: ParamSet<(
+        Query<&mut Text, With<SkinLabel>>,
+        Query<&mut Text, With<SkinDescLabel>>,
+        Query<&mut Text, With<MapLabel>>,
+        Query<&mut Text, With<MapDescLabel>>,
+        Query<&mut Text, With<MapScoresLabel>>,
+    )>,
+    mut img_q: ParamSet<(
+        Query<&mut UiImage, With<SkinPreviewImage>>,
+        Query<&mut UiImage, With<MapPreviewImage>>,
+    )>,
+) {
+    let fmt_time = |v: f32| {
+        let mins = (v / 60.0) as u32;
+        let secs = (v % 60.0) as u32;
+        let tenths = ((v % 1.0) * 10.0) as u32;
+        format!("{:02}:{:02}.{}", mins, secs, tenths)
+    };
+
+    if map_catalog.is_changed() {
+        let idx = carousel_state.map_idx.min(map_catalog.maps.len().saturating_sub(1));
+        if let Some(m) = map_catalog.maps.get(idx) {
+            let scene = match m.id.as_str() {
+                "ice_caves"     => SceneKind::IceCaves,
+                "desert_planet" => SceneKind::DesertPlanet,
+                "idf_transport" => SceneKind::IdfTransport,
+                _               => SceneKind::SpaceAsteroids,
+            };
+            active_scene.0 = scene.clone();
+            let label = m.label.clone();
+            let desc  = m.description.clone();
+            for mut t in text_q.p2().iter_mut() { t.sections[0].value = label.clone(); }
+            for mut t in text_q.p3().iter_mut() { t.sections[0].value = desc.clone(); }
+            let scores = leaderboard.scores(&scene);
+            let scores_text = if scores.is_empty() {
+                "No records yet".into()
+            } else {
+                scores.iter().enumerate()
+                    .map(|(i, &s)| format!("{}  {}", ["#1", "#2", "#3"][i], fmt_time(s)))
+                    .collect::<Vec<_>>()
+                    .join("   ")
+            };
+            for mut t in text_q.p4().iter_mut() { t.sections[0].value = scores_text.clone(); }
+        }
+        let h_idx = carousel_state.map_idx.min(map_images.handles.len().saturating_sub(1));
+        if let Some(handle) = map_images.handles.get(h_idx) {
+            let h = handle.clone();
+            for mut img in img_q.p1().iter_mut() { img.texture = h.clone(); }
+        }
+    }
+
+    if skin_catalog.is_changed() {
+        let idx = carousel_state.skin_idx.min(skin_catalog.skins.len().saturating_sub(1));
+        if let Some(s) = skin_catalog.skins.get(idx) {
+            let label = s.label.clone();
+            let desc  = s.description.clone();
+            for mut t in text_q.p0().iter_mut() { t.sections[0].value = label.clone(); }
+            for mut t in text_q.p1().iter_mut() { t.sections[0].value = desc.clone(); }
+        }
+        let h_idx = carousel_state.skin_idx.min(skin_images.handles.len().saturating_sub(1));
+        if let Some(handle) = skin_images.handles.get(h_idx) {
+            let h = handle.clone();
+            for mut img in img_q.p0().iter_mut() { img.texture = h.clone(); }
+        }
     }
 }
 
 // ── Update – danger vignette + missile warning ────────────────────────────────
+
+/// Station picker toggle buttons
+pub fn idf_station_toggle_system(
+    interaction_q: Query<(&Interaction, &IdfStationToggleBtn), (Changed<Interaction>, With<Button>)>,
+    mut btn_q: Query<(&IdfStationToggleBtn, &mut BackgroundColor)>,
+    mut text_q: Query<(&IdfStationToggleText, &mut Text)>,
+    mut idf_config: ResMut<IdfConfig>,
+) {
+    let mut changed = false;
+    for (interaction, btn) in interaction_q.iter() {
+        if *interaction != Interaction::Pressed { continue; }
+        let idx = btn.station_idx;
+        if let Some(pos) = idf_config.selected_stations.iter().position(|&i| i == idx) {
+            idf_config.selected_stations.remove(pos);
+        } else {
+            idf_config.selected_stations.push(idx);
+        }
+        changed = true;
+    }
+    if !changed { return; }
+    // Refresh all button visuals
+    let selected = &idf_config.selected_stations;
+    let all_on = selected.is_empty();
+    for (btn, mut bg) in btn_q.iter_mut() {
+        let is_on = all_on || selected.contains(&btn.station_idx);
+        bg.0 = if is_on { Color::rgb(0.06, 0.20, 0.22) } else { Color::rgb(0.03, 0.08, 0.10) };
+    }
+    for (txt_comp, mut text) in text_q.iter_mut() {
+        let is_on = all_on || selected.contains(&txt_comp.station_idx);
+        if let Some(s) = IDF_STATIONS.get(txt_comp.station_idx) {
+            text.sections[0].value = format!("{} {}", if is_on { "●" } else { "○" }, s.1);
+        }
+    }
+}
+
+/// Collapse / expand the station picker when the header button is clicked.
+pub fn idf_picker_collapse_system(
+    header_q: Query<&Interaction, (Changed<Interaction>, With<IdfPickerHeaderBtn>)>,
+    mut content_q: Query<&mut Style, With<IdfPickerScrollContent>>,
+    mut text_q: Query<&mut Text, With<IdfPickerHeaderText>>,
+) {
+    for interaction in header_q.iter() {
+        if *interaction != Interaction::Pressed { continue; }
+        for mut style in content_q.iter_mut() {
+            let is_visible = style.display != Display::None;
+            style.display = if is_visible { Display::None } else { Display::Flex };
+            // Update header arrow
+            for mut txt in text_q.iter_mut() {
+                txt.sections[0].value = if is_visible {
+                    "▶  Select stations to track  (click to expand)".into()
+                } else {
+                    "▼  Select stations to track  (click to collapse)".into()
+                };
+            }
+        }
+    }
+}
+
+/// Mouse-wheel scrolling for the station picker content.
+pub fn idf_picker_scroll_system(
+    mut scroll_evts: EventReader<bevy::input::mouse::MouseWheel>,
+    scroll_content_q: Query<(&Node, &Children), With<IdfPickerScrollContent>>,
+    mut inner_q: Query<(&Node, &mut Style), Without<IdfPickerScrollContent>>,
+) {
+    let mut delta_px: f32 = 0.0;
+    for ev in scroll_evts.iter() {
+        delta_px += match ev.unit {
+            bevy::input::mouse::MouseScrollUnit::Line => ev.y * 28.0,
+            bevy::input::mouse::MouseScrollUnit::Pixel => ev.y,
+        };
+    }
+    if delta_px.abs() < 0.1 { return; }
+
+    for (container_node, children) in scroll_content_q.iter() {
+        let container_h = container_node.size().y;
+        for &child in children.iter() {
+            if let Ok((inner_node, mut inner_style)) = inner_q.get_mut(child) {
+                let content_h = inner_node.size().y;
+                let max_scroll = (content_h - container_h).max(0.0);
+                let current = match inner_style.top {
+                    Val::Px(v) => v,
+                    _ => 0.0,
+                };
+                // delta_px > 0 means scroll-up → move content down (less negative top)
+                let new_top = (current + delta_px).clamp(-max_scroll, 0.0);
+                inner_style.top = Val::Px(new_top);
+            }
+        }
+    }
+}
+
 pub fn danger_hud_system(
     time: Res<Time>,
     missiles: Query<&Transform, With<crate::components::Missile>>,

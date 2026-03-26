@@ -18,9 +18,10 @@ use systems::ui::menu::{button_appearance_system, menu_ui_system, menu_button_sy
 use systems::ui::start_menu::{
     setup_start_menu, teardown_start_menu,
     start_menu_button_system, start_menu_button_appearance_system,
-    start_menu_carousel_system,
+    start_menu_carousel_system, catalog_refresh_system,
     enter_playing, spawn_timer_ui, despawn_timer_ui, update_timer,
-    danger_hud_system,
+    danger_hud_system, idf_station_toggle_system,
+    idf_picker_collapse_system, idf_picker_scroll_system,
 };
 use systems::ui::death_screen::{
     setup_death_screen, teardown_death_screen,
@@ -32,11 +33,17 @@ use systems::ui::copilot_chat::{
     setup_llm_chat_ui, teardown_llm_chat_ui,
     llm_chat_toggle_system, llm_chat_input_system,
     llm_chat_poll_system, llm_chat_save_system,
+    llm_chat_scroll_system,
 };
 use systems::enemies::missiles::{missile_spawner_system, missile_movement_system, despawn_missiles};
 use systems::enemies::alien_ships::{alien_ship_spawner_system, alien_ship_movement_system, alien_ship_shoot_system, despawn_alien_ships};
 use systems::enemies::combat::{shoot_laser_system, laser_movement_system, portal_animation_system, explosion_animation_system, health_pip_update_system, despawn_effects};
-use systems::core::player_ship::spawn_player_ship_system;
+use systems::core::player_ship::{spawn_player_ship_system, ship_bank_system, ShipRollState};
+use systems::scenes::idf_transport::{
+    spawn_idf_hud, idf_train_movement_system,
+    idf_fetch_next_trains_system, idf_proximity_hud_system,
+    IdfPrimPollTimer,
+};
 use systems::data_loader::load_catalogs;
 
 const SHUTTLE_SPEED: f32 = 20_000.0;
@@ -53,6 +60,7 @@ fn main() {
         .insert_resource(Keybindings::load())
         .insert_resource(RebindState::default())
         .insert_resource(Throttle(0.0))
+        .insert_resource(SpeedMode::default())
         .insert_resource(PrevCameraPosition::default())
         .insert_resource(VelocityUpdates::default())
         .insert_resource(RingLodUpdateTimer(Timer::from_seconds(0.2, TimerMode::Repeating)))
@@ -69,6 +77,10 @@ fn main() {
         .insert_resource(CameraMode::default())
         .insert_resource(CameraArmOffset::default())
         .insert_resource(LlmChatState::default())
+        .insert_resource(ShipRollState::default())
+        .insert_resource(IdfConfig::default())
+        .insert_resource(IdfNextTrains::default())
+        .insert_resource(IdfPrimPollTimer::default())
         // ── Startup ──────────────────────────────────────────────────────────
         .add_systems(Startup, (setup::setup, load_catalogs))
         // ── State enter/exit hooks ───────────────────────────────────────────
@@ -81,6 +93,7 @@ fn main() {
             spawn_timer_ui,
             spawn_minimap_ui,
             setup_llm_chat_ui,
+            spawn_idf_hud.after(spawn_active_scene_system),
         ))
         .add_systems(OnExit(GameState::Playing), (despawn_timer_ui, despawn_minimap_ui, teardown_llm_chat_ui, despawn_missiles, despawn_alien_ships, despawn_effects, despawn_scene_entities))
         .add_systems(OnEnter(GameState::Dead), setup_death_screen)
@@ -94,6 +107,10 @@ fn main() {
                 start_menu_button_appearance_system,
                 start_menu_button_system.after(start_menu_button_appearance_system),
                 start_menu_carousel_system.after(start_menu_button_system),
+                catalog_refresh_system.after(start_menu_carousel_system),
+                idf_station_toggle_system,
+                idf_picker_collapse_system,
+                idf_picker_scroll_system,
             )
                 .run_if(in_state(GameState::StartMenu)),
         )
@@ -103,6 +120,7 @@ fn main() {
             (
                 llm_chat_toggle_system,
                 llm_chat_input_system.after(llm_chat_toggle_system),
+                llm_chat_scroll_system.after(llm_chat_toggle_system),
                 llm_chat_poll_system.after(llm_chat_input_system),
                 llm_chat_save_system.after(llm_chat_poll_system),
             )
@@ -117,6 +135,7 @@ fn main() {
                 toggle_menu_system,
                 systems::core::camera_view::camera_toggle_system,
                 player_movement_system.after(mouse_look_system),
+                ship_bank_system.after(player_movement_system),
                 systems::core::camera_view::apply_arm_offset_system.after(player_movement_system),
                 record_camera_position_system.after(systems::core::camera_view::apply_arm_offset_system),
                 ui_update_system.after(player_movement_system),
@@ -150,6 +169,9 @@ fn main() {
                 explosion_animation_system,
                 health_pip_update_system,
                 update_minimap_system,
+                idf_train_movement_system,
+                idf_proximity_hud_system,
+                idf_fetch_next_trains_system,
             )
                 .run_if(in_state(GameState::Playing)),
         )
