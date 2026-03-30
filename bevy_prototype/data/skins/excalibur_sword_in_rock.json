@@ -1,0 +1,16 @@
+{
+  "id": "excalibur_sword_in_rock",
+  "label": "Excalibur in the Stone",
+  "description": "A legendary ship shaped like a sword embedded in a rock, inspired by the mythical Excalibur.",
+  "primary_color": [0.7, 0.7, 0.7],
+  "secondary_color": [0.3, 0.3, 0.3],
+  "emissive_color": [0.2, 0.7, 1.0],
+  "preview_svg": "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 80'><rect width='120' height='80' fill='#050c10'/><g transform='translate(60,40)'><rect x='-12' y='4' width='24' height='14' rx='3' fill='#4a3830' stroke='#2a1810' stroke-width='1.5'/><rect x='-2' y='-28' width='4' height='32' fill='#c0c8d0' stroke='#8090a0' stroke-width='0.8'/><rect x='-10' y='-4' width='20' height='3' rx='1' fill='#b08050' stroke='#806030' stroke-width='0.8'/><polygon points='0,-28 2,-24 0,-36 -2,-24' fill='#d0e8ff'/><circle cx='0' cy='-6' r='1.5' fill='#40c0ff' opacity='0.9'/></g></svg>",
+  "parts": [
+    { "shape": "box",     "size": [2.20, 1.00, 1.80], "pos": [0, 0.20,  1.40], "color_rgb": [0.38, 0.28, 0.22], "metallic": 0.3, "roughness": 0.9 },
+    { "shape": "capsule", "radius": 0.14, "height": 3.60, "pos": [0, 0.10, -0.80], "rot": [90, 0, 0], "color_rgb": [0.78, 0.82, 0.88], "metallic": 0.85, "roughness": 0.15 },
+    { "shape": "box",     "size": [1.50, 0.22, 0.30], "pos": [0, 0.10, -0.20], "color_rgb": [0.82, 0.65, 0.38], "metallic": 0.75, "roughness": 0.25 },
+    { "shape": "cone",    "radius": 0.14, "height": 0.60, "pos": [0, 0.10, -2.65], "rot": [-90, 0, 0], "color_rgb": [0.88, 0.92, 1.00], "emissive_rgb": [0.15, 0.40, 0.80], "metallic": 1.0, "roughness": 0.05 },
+    { "shape": "sphere",  "radius": 0.20, "pos": [0, 0.10,  1.00], "color_rgb": [0.82, 0.65, 0.38], "emissive_rgb": [0.10, 0.30, 0.50] }
+  ]
+}
