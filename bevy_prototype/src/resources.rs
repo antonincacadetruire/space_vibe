@@ -420,6 +420,20 @@ impl Default for ZoneBoundary {
     }
 }
 
+/// Dynamic maximum speed for Z/S manual flight (units/s).
+/// Can be changed in-game via AI command `[CMD: set_speed <value>]`.
+#[derive(Resource)]
+pub struct MaxSpeed(pub f32);
+
+impl Default for MaxSpeed {
+    fn default() -> Self { MaxSpeed(40_000.0) }
+}
+
+/// One-shot teleport request set by AI command execution.
+/// `player_movement_system` consumes it (`.take()`) each frame.
+#[derive(Resource, Default)]
+pub struct TeleportRequest(pub Option<Vec3>);
+
 // ── Camera view mode (first-person or third-person) ───────────────────────────
 #[derive(Resource, Debug, Clone, PartialEq, Eq)]
 pub enum CameraMode {

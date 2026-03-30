@@ -21,8 +21,9 @@ use std::sync::{Arc, Mutex};
 use crate::components::{
     CopilotChatRoot, CopilotChatBlocker, CopilotChatLog, CopilotInputBox, CopilotInputText,
     CopilotSendButton, CopilotSaveButton, CopilotChangeKeyButton, CopilotStatusText,
+    CopilotScrollThumb,
 };
-use crate::resources::GameState;
+use crate::resources::{GameState, ZoneBoundary, MaxSpeed, TeleportRequest};
 use crate::resources::TimePaused;
 use crate::setup::resolve_ui_font_path;
 use crate::systems::data_loader::{LlmConfigResource, MapCatalog, MapCatalogImages, SkinCatalog, SkinCatalogImages, svg_to_image, CarouselState};
@@ -96,6 +97,11 @@ pub struct LlmChatState {
     pub was_paused_before_chat: bool,
     /// Scroll offset: how many messages from the END to skip (0 = show latest).
     pub scroll_offset: usize,
+    /// A game command extracted from the last AI reply (e.g. `set_speed 30000`).
+    /// Player must type `/confirm` or `/cancel` to act on it.
+    pub pending_command: Option<String>,
+    /// Becomes true when the player types `/confirm` — consumed by save_system.
+    pub command_confirmed: bool,
 }
 
 impl LlmChatState {
@@ -109,6 +115,52 @@ impl LlmChatState {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/// Soft-wrap a single text line into segments of at most `max_chars` characters,
+/// breaking on word boundaries where possible.
+fn soft_wrap_line(line: &str, max_chars: usize) -> Vec<String> {
+    if line.len() <= max_chars {
+        return vec![line.to_string()];
+    }
+    let mut result = Vec::new();
+    let mut remaining = line;
+    while remaining.len() > max_chars {
+        // Find last word boundary within max_chars
+        let cut = remaining[..max_chars].rfind(' ').unwrap_or(max_chars);
+        result.push(remaining[..cut].to_string());
+        remaining = remaining[cut..].trim_start_matches(' ');
+    }
+    if !remaining.is_empty() {
+        result.push(remaining.to_string());
+    }
+    result
+}
+
+/// Flatten all messages into soft-wrapped lines: (line_text, is_user).
+/// `max_chars` should match the approximate visual width of the text area.
+fn flatten_to_lines(conversation: &[ChatMessage], max_chars: usize) -> Vec<(String, bool)> {
+    let mut all_lines: Vec<(String, bool)> = Vec::new();
+    for msg in conversation {
+        let is_user = msg.is_user;
+        let prefix = if is_user { "You: " } else { "AI:  " };
+        let indent = "     ";
+        let full = format!("{prefix}{}", msg.text);
+        let mut first = true;
+        for raw_line in full.lines() {
+            let wrapped = soft_wrap_line(raw_line, max_chars);
+            for (wi, w) in wrapped.iter().enumerate() {
+                if first && wi == 0 {
+                    all_lines.push((w.clone(), is_user));
+                    first = false;
+                } else {
+                    all_lines.push((format!("{indent}{w}"), is_user));
+                }
+            }
+        }
+        all_lines.push((String::new(), is_user)); // blank spacer between messages
+    }
+    all_lines
+}
+
 /// Extract the first ```json … ``` block from a string.
 fn extract_json_block(text: &str) -> Option<String> {
     // Accept both ```json and ``` as opening fence
@@ -119,6 +171,50 @@ fn extract_json_block(text: &str) -> Option<String> {
     let end = rest.find("```")?;
     let raw = rest[..end].trim().to_owned();
     if raw.starts_with('{') { Some(raw) } else { None }
+}
+
+/// Extract the first `[CMD: ...]` block from an AI response.
+fn extract_command_block(text: &str) -> Option<String> {
+    let start = text.find("[CMD:")?;
+    let inner = start + 5; // skip "[CMD:"
+    let rest = &text[inner..];
+    let end = rest.find(']')?;
+    Some(rest[..end].trim().to_owned())
+}
+
+/// Execute a game command string (e.g. `"set_speed 30000"`).
+/// Returns a human-readable result message.
+fn apply_command(
+    cmd: &str,
+    boundary: &mut ZoneBoundary,
+    max_speed: &mut MaxSpeed,
+    teleport: &mut TeleportRequest,
+) -> String {
+    let parts: Vec<&str> = cmd.splitn(2, ' ').collect();
+    match parts.as_slice() {
+        ["set_speed", val] => match val.trim().parse::<f32>() {
+            Ok(v) => {
+                max_speed.0 = v.clamp(1_000.0, 500_000.0);
+                format!("✓ Max speed set to {:.0} units/s", max_speed.0)
+            }
+            Err(_) => "✗ Invalid value. Example: [CMD: set_speed 30000]".to_owned(),
+        },
+        ["set_boundary", val] => match val.trim().parse::<f32>() {
+            Ok(v) => {
+                boundary.0 = v.clamp(10_000.0, 10_000_000.0);
+                format!("✓ Zone boundary set to {:.0} units", boundary.0)
+            }
+            Err(_) => "✗ Invalid value. Example: [CMD: set_boundary 500000]".to_owned(),
+        },
+        ["teleport_origin"] | ["teleport"] => {
+            teleport.0 = Some(Vec3::ZERO);
+            "✓ Teleporting to origin…".to_owned()
+        }
+        _ => format!(
+            "✗ Unknown command: '{}'\nAvailable: set_speed <v>, set_boundary <r>, teleport_origin",
+            cmd
+        ),
+    }
 }
 
 /// Infer whether the JSON is a MAP, SKIN, or ENEMY definition from its keys.
@@ -170,8 +266,146 @@ fn save_json(json: &str, kind: &str) -> Result<String, String> {
     Ok(path.to_string_lossy().to_string())
 }
 
-// ── HTTP worker ───────────────────────────────────────────────────────────────
+/// Generate a Rust scene template for a map JSON and write it to
+/// `src/systems/scenes/<id>.rs`.  Returns `Ok(path)` on success.
+/// The generated file is a compilable Bevy scene stub seeded with the map's
+/// boundary radius, sky/accent colours and label.
+fn generate_scene_rs(json: &str) -> Result<String, String> {
+    let v: serde_json::Value = serde_json::from_str(json)
+        .map_err(|e| format!("JSON parse: {e}"))?;
 
+    let id    = v.get("id").and_then(|s| s.as_str()).unwrap_or("custom_map");
+    let label = v.get("label").and_then(|s| s.as_str()).unwrap_or("Custom Scene");
+    let boundary = v.get("boundary_radius").and_then(|n| n.as_f64()).unwrap_or(300_000.0);
+
+    let (r, g, b) = if let Some(arr) = v.get("accent_color").and_then(|a| a.as_array()) {
+        let r = arr.get(0).and_then(|n| n.as_f64()).unwrap_or(0.3) as f32;
+        let g = arr.get(1).and_then(|n| n.as_f64()).unwrap_or(0.3) as f32;
+        let b = arr.get(2).and_then(|n| n.as_f64()).unwrap_or(0.3) as f32;
+        (r, g, b)
+    } else {
+        (0.3_f32, 0.3_f32, 0.3_f32)
+    };
+
+    // Sanitise id into a valid Rust identifier
+    let fn_name: String = id.chars()
+        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .collect();
+
+    let (er, eg, eb) = (r * 0.25, g * 0.25, b * 0.25);
+    let sky_radius = (boundary * 1.5) as u32;
+
+    let code = format!(
+r#"//! Auto-generated scene: {label}
+//! To integrate this scene add:
+//!   1. `pub mod {fn_name};` in src/systems/scenes/mod.rs
+//!   2. A `{fn_name_pascal}` variant to `SceneKind` in src/resources.rs
+//!   3. `use super::{fn_name}::spawn_{fn_name}_scene;` in scene_manager.rs
+//!   4. A match arm in `spawn_active_scene_system` in scene_manager.rs
+use bevy::prelude::*;
+use rand::Rng;
+
+use crate::components::{{SceneEntity, SkyDome}};
+
+pub const SCENE_BOUNDARY: f32 = {boundary:.0};
+
+pub fn spawn_{fn_name}_scene(
+    commands: &mut Commands,
+    meshes:    &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    _rng:      &mut impl Rng,
+) -> Transform {{
+    // ── Lighting ──────────────────────────────────────────────────────────────
+    commands.insert_resource(AmbientLight {{
+        color:      Color::rgb({r:.2}, {g:.2}, {b:.2}),
+        brightness: 0.55,
+    }});
+
+    commands.spawn((
+        DirectionalLightBundle {{
+            directional_light: DirectionalLight {{
+                illuminance: 85_000.0,
+                color: Color::WHITE,
+                shadows_enabled: false,
+                ..default()
+            }},
+            transform: Transform::from_rotation(
+                Quat::from_euler(EulerRot::XYZ, -0.55, 0.35, 0.0),
+            ),
+            ..default()
+        }},
+        SceneEntity,
+    ));
+
+    // ── Sky dome ──────────────────────────────────────────────────────────────
+    commands.spawn((
+        PbrBundle {{
+            mesh: meshes.add(Mesh::from(shape::UVSphere {{
+                radius: {sky_radius}.0,
+                sectors: 36,
+                stacks: 20,
+            }})),
+            material: materials.add(StandardMaterial {{
+                base_color: Color::rgb({r:.2}, {g:.2}, {b:.2}),
+                emissive:   Color::rgb({er:.2}, {eg:.2}, {eb:.2}),
+                unlit: true,
+                cull_mode: None,
+                ..default()
+            }}),
+            ..default()
+        }},
+        SkyDome,
+        SceneEntity,
+    ));
+
+    // ── Player start transform ─────────────────────────────────────────────────
+    Transform::from_translation(Vec3::ZERO)
+        .looking_at(Vec3::NEG_Z, Vec3::Y)
+}}
+"#,
+        label       = label,
+        fn_name     = fn_name,
+        fn_name_pascal = {
+            let mut s = fn_name.clone();
+            if let Some(c) = s.get_mut(0..1) { c.make_ascii_uppercase(); }
+            s
+        },
+        boundary    = boundary,
+        r = r, g = g, b = b,
+        er = er, eg = eg, eb = eb,
+        sky_radius  = sky_radius,
+    );
+
+    // Try src/systems/scenes/ relative to cwd (works with `cargo run`)
+    let scenes_dir = {
+        let cwd = std::path::PathBuf::from("src").join("systems").join("scenes");
+        if cwd.exists() {
+            cwd
+        } else {
+            // Fall back: walk up from the executable looking for `src/`
+            std::env::current_exe()
+                .ok()
+                .and_then(|e| {
+                    // target/debug/ → project root
+                    e.parent()?.parent()?.parent().map(|root| {
+                        root.join("src").join("systems").join("scenes")
+                    })
+                })
+                .unwrap_or_else(|| std::path::PathBuf::from("src").join("systems").join("scenes"))
+        }
+    };
+
+    std::fs::create_dir_all(&scenes_dir)
+        .map_err(|e| format!("mkdir {:?}: {e}", scenes_dir))?;
+
+    let path = scenes_dir.join(format!("{fn_name}.rs"));
+    std::fs::write(&path, code)
+        .map_err(|e| format!("write {:?}: {e}", path))?;
+
+    Ok(path.to_string_lossy().to_string())
+}
+
+// ── HTTP worker ───────────────────────────────────────────────────────────────
 /// Spawns a background thread that calls the LLM API and writes the result
 /// into the shared `slot`.
 fn spawn_llm_request(
@@ -303,12 +537,12 @@ pub fn setup_llm_chat_ui(mut commands: Commands, asset_server: Res<AssetServer>)
                 ));
             });
 
-            // Conversation log (flex-growing)
+            // Conversation log (flex-growing) — row: [text | scrollbar]
             root.spawn(NodeBundle {
                 style: Style {
                     flex_grow: 1.0,
                     width: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Column,
+                    flex_direction: FlexDirection::Row,
                     overflow: Overflow::clip(),
                     margin: UiRect::bottom(Val::Px(6.0)),
                     padding: UiRect::all(Val::Px(6.0)),
@@ -316,23 +550,63 @@ pub fn setup_llm_chat_ui(mut commands: Commands, asset_server: Res<AssetServer>)
                 },
                 background_color: Color::rgba(0.0, 0.02, 0.04, 0.60).into(),
                 ..default()
-            }).with_children(|log_area| {
-                log_area.spawn((
-                    CopilotChatLog,
-                    TextBundle {
-                        text: Text::from_sections(vec![
-                            TextSection::new(
-                                "[Ask me to generate a map, skin or enemy]\n[Type /setkey YOUR_GITHUB_PAT to set your API key]\n",
-                                TextStyle { font: font.clone(), font_size: 13.0, color: Color::rgba(0.55, 0.75, 0.80, 0.55) },
-                            ),
-                        ]),
-                        style: Style {
-                            flex_wrap: FlexWrap::Wrap,
-                            ..default()
-                        },
+            }).with_children(|log_row| {
+                // Text column
+                log_row.spawn(NodeBundle {
+                    style: Style {
+                        flex_grow: 1.0,
+                        flex_direction: FlexDirection::Column,
+                        overflow: Overflow::clip(),
                         ..default()
                     },
-                ));
+                    ..default()
+                }).with_children(|text_col| {
+                    text_col.spawn((
+                        CopilotChatLog,
+                        TextBundle {
+                            text: Text::from_sections(vec![
+                                TextSection::new(
+                                    "[Ask me to generate a map, skin or enemy]\n[Type /setkey YOUR_GITHUB_PAT to set your API key]\n",
+                                    TextStyle { font: font.clone(), font_size: 13.0, color: Color::rgba(0.55, 0.75, 0.80, 0.55) },
+                                ),
+                            ]),
+                            style: Style {
+                                flex_wrap: FlexWrap::Wrap,
+                                ..default()
+                            },
+                            ..default()
+                        },
+                    ));
+                });
+
+                // Scrollbar track
+                log_row.spawn(NodeBundle {
+                    style: Style {
+                        width: Val::Px(12.0),
+                        height: Val::Percent(100.0),
+                        flex_shrink: 0.0,
+                        margin: UiRect::left(Val::Px(4.0)),
+                        ..default()
+                    },
+                    background_color: Color::rgba(0.08, 0.18, 0.25, 0.85).into(),
+                    ..default()
+                }).with_children(|track| {
+                    // Thumb — position updated each frame by llm_chat_poll_system
+                    track.spawn((
+                        CopilotScrollThumb,
+                        NodeBundle {
+                            style: Style {
+                                position_type: PositionType::Absolute,
+                                width: Val::Percent(100.0),
+                                height: Val::Percent(100.0),
+                                top: Val::Percent(0.0),
+                                ..default()
+                            },
+                            background_color: Color::rgba(0.25, 0.75, 1.0, 0.95).into(),
+                            ..default()
+                        },
+                    ));
+                });
             });
 
             // Input row
@@ -586,6 +860,26 @@ pub fn llm_chat_input_system(
         chat.input_buffer.clear();
         chat.scroll_offset = 0; // jump to bottom on send
 
+        // ── Command confirmation shortcuts ──────────────────────────────────
+        if prompt == "/confirm" {
+            chat.add_user("/confirm");
+            if chat.pending_command.is_some() {
+                chat.command_confirmed = true;
+            } else {
+                chat.add_ai("No pending command to confirm.");
+            }
+            return;
+        }
+        if prompt == "/cancel" {
+            chat.add_user("/cancel");
+            if chat.pending_command.take().is_some() {
+                chat.add_ai("Command cancelled.");
+            } else {
+                chat.add_ai("No pending command to cancel.");
+            }
+            return;
+        }
+
         // ── API key prompt mode ────────────────────────────────────────────
         if chat.awaiting_api_key {
             let key = prompt.trim().to_owned();
@@ -644,7 +938,8 @@ pub fn llm_chat_poll_system(
         Query<&mut Text, With<CopilotChatLog>>,
         Query<&mut Text, With<CopilotStatusText>>,
     )>,
-    mut save_q: Query<&mut Style, With<CopilotSaveButton>>,
+    mut save_q: Query<&mut Style, (With<CopilotSaveButton>, Without<CopilotScrollThumb>)>,
+    mut scroll_thumb_q: Query<&mut Style, (With<CopilotScrollThumb>, Without<CopilotSaveButton>)>,
     asset_server: Res<AssetServer>,
 ) {
     // Update status spinner text
@@ -679,12 +974,22 @@ pub fn llm_chat_poll_system(
             Ok(content) => {
                 chat.status = LlmStatus::Idle;
                 chat.last_json = extract_json_block(&content);
-                let display_text = if chat.last_json.is_some() {
-                    format!("{content}\n[JSON block detected – click Save to write to disk]")
+
+                // Check for a game command block `[CMD: ...]`
+                if let Some(cmd) = extract_command_block(&content) {
+                    chat.pending_command = Some(cmd.clone());
+                    chat.add_ai(&format!(
+                        "{}\n\n⚡ Command: [{}]\nType /confirm to execute or /cancel to dismiss.",
+                        content, cmd
+                    ));
                 } else {
-                    content
-                };
-                chat.add_ai(&display_text);
+                    let display_text = if chat.last_json.is_some() {
+                        format!("{content}\n[JSON block detected – click Save to write to disk]")
+                    } else {
+                        content
+                    };
+                    chat.add_ai(&display_text);
+                }
             }
         }
     }
@@ -706,34 +1011,70 @@ pub fn llm_chat_poll_system(
                     TextStyle { font: font.clone(), font_size: 13.0, color: Color::rgba(0.55, 0.75, 0.80, 0.55) },
                 )];
             } else {
-                // Show at most MAX_VISIBLE messages from the end, offset by scroll_offset
-                const MAX_VISIBLE: usize = 20;
-                let total = chat.conversation.len();
-                let skip = chat.scroll_offset.min(total.saturating_sub(1));
-                let end = total.saturating_sub(skip);
-                let start = end.saturating_sub(MAX_VISIBLE);
+                // Flatten all messages into individual lines for smooth line-based scrolling.
+                const MAX_VIS_LINES: usize = 35;
+                // Build flat list: (line_text, is_user)
+                let mut all_lines: Vec<(String, bool)> = Vec::new();
+                for msg in &chat.conversation {
+                    let color_owner = msg.is_user;
+                    let prefix = if msg.is_user { "You: " } else { "AI:  " };
+                    let full = format!("{prefix}{}", msg.text);
+                    let sub: Vec<&str> = full.lines().collect();
+                    for (i, line) in sub.iter().enumerate() {
+                        if i == 0 {
+                            all_lines.push((line.to_string(), color_owner));
+                        } else {
+                            all_lines.push((format!("     {line}"), color_owner));
+                        }
+                    }
+                    all_lines.push((String::new(), color_owner)); // blank spacer between messages
+                }
 
-                let mut sections: Vec<TextSection> = chat.conversation[start..end].iter().map(|msg| {
-                    let (prefix, color) = if msg.is_user {
-                        ("You: ", Color::rgb(0.35, 0.88, 0.55))
+                let total_lines = all_lines.len();
+                let skip = chat.scroll_offset.min(total_lines.saturating_sub(1));
+                let end = total_lines.saturating_sub(skip);
+                let start = end.saturating_sub(MAX_VIS_LINES);
+
+                let mut sections: Vec<TextSection> = all_lines[start..end].iter().map(|(line, is_user)| {
+                    let color = if *is_user {
+                        Color::rgb(0.35, 0.88, 0.55)
                     } else {
-                        ("AI:  ", Color::rgb(0.18, 0.80, 0.95))
+                        Color::rgb(0.18, 0.80, 0.95)
                     };
                     TextSection::new(
-                        format!("{prefix}{}\n", msg.text),
+                        format!("{line}\n"),
                         TextStyle { font: font.clone(), font_size: 13.0, color },
                     )
                 }).collect();
 
-                // Scroll indicator line at top if we're scrolled up
+                // Scroll indicator at top when scrolled up
                 if skip > 0 {
                     sections.insert(0, TextSection::new(
-                        format!("↑ {} more above (scroll to read) ↑\n", total.saturating_sub(end)),
+                        format!("↑ {} more lines above ↑\n", total_lines.saturating_sub(end)),
                         TextStyle { font: font.clone(), font_size: 11.0, color: Color::rgba(0.70, 0.70, 0.40, 0.70) },
                     ));
                 }
                 log_text.sections = sections;
             }
+        }
+    }
+
+    // Update scrollbar thumb — same line count as the display.
+    const MAX_VIS_LINES: usize = 35;
+    const MAX_CHARS: usize = 60;
+    let total_lines = flatten_to_lines(&chat.conversation, MAX_CHARS).len();
+    if let Ok(mut thumb) = scroll_thumb_q.get_single_mut() {
+        if total_lines <= MAX_VIS_LINES {
+            thumb.height = Val::Percent(100.0);
+            thumb.top    = Val::Percent(0.0);
+        } else {
+            let max_offset   = (total_lines - MAX_VIS_LINES) as f32;
+            let thumb_pct    = MAX_VIS_LINES as f32 / total_lines as f32 * 100.0;
+            let scroll_ratio = (chat.scroll_offset as f32).min(max_offset) / max_offset;
+            // 0 = newest (bottom), 1 = oldest (top)
+            let top_pct = (1.0 - scroll_ratio) * (100.0 - thumb_pct);
+            thumb.height = Val::Percent(thumb_pct);
+            thumb.top    = Val::Percent(top_pct);
         }
     }
 }
@@ -746,16 +1087,18 @@ pub fn llm_chat_scroll_system(
 ) {
     if !chat.open { return; }
     for ev in scroll_evts.iter() {
+        // 3 lines per wheel notch for smooth, progressive scrolling
         let delta = match ev.unit {
-            bevy::input::mouse::MouseScrollUnit::Line => ev.y as i32,
-            bevy::input::mouse::MouseScrollUnit::Pixel => (ev.y / 40.0) as i32,
+            bevy::input::mouse::MouseScrollUnit::Line  => (ev.y * 3.0) as i32,
+            bevy::input::mouse::MouseScrollUnit::Pixel => (ev.y / 15.0) as i32,
         };
-        let total = chat.conversation.len();
-        // Scroll up (positive delta) → increase scroll_offset (show older msgs)
-        // Scroll down (negative delta) → decrease scroll_offset (show newer msgs)
+        let total_lines: usize = flatten_to_lines(&chat.conversation, 60).len();
+        const MAX_VIS_LINES: usize = 35;
+        let max_offset = total_lines.saturating_sub(MAX_VIS_LINES);
+        // Scroll up (positive delta) → increase offset (show older lines)
         let new_offset = (chat.scroll_offset as i32 - delta)
             .max(0)
-            .min((total as i32).saturating_sub(1)) as usize;
+            .min(max_offset as i32) as usize;
         chat.scroll_offset = new_offset;
     }
 }
@@ -772,6 +1115,9 @@ pub fn llm_chat_save_system(
     mut skin_images: ResMut<SkinCatalogImages>,
     mut images: ResMut<Assets<Image>>,
     mut carousel_state: ResMut<CarouselState>,
+    mut boundary: ResMut<ZoneBoundary>,
+    mut max_speed: ResMut<MaxSpeed>,
+    mut teleport: ResMut<TeleportRequest>,
 ) {
     // ── Change Key button
     for interaction in &change_key_q {
@@ -794,6 +1140,20 @@ pub fn llm_chat_save_system(
                                 .collect();
                             // Jump carousel to the newly added map (last entry after sort).
                             carousel_state.map_idx = map_catalog.maps.len().saturating_sub(1);
+
+                            // Also generate a Rust scene template file.
+                            let rs_note = match generate_scene_rs(json) {
+                                Ok(rs_path) => format!(
+                                    "\n📄 Scene stub → {rs_path}\n\
+                                     ➡ Add `pub mod <id>;` to scenes/mod.rs\n\
+                                     ➡ Add variant + match arm in resources.rs / scene_manager.rs"
+                                ),
+                                Err(e) => format!("\n⚠ Could not write .rs file: {e}"),
+                            };
+                            let msg = format!(
+                                "Saved to {path}\n✨ Added to start-menu carousel!{rs_note}"
+                            );
+                            chat.add_ai(&msg);
                         }
                         "skins" => {
                             *skin_catalog = SkinCatalog::load();
@@ -801,14 +1161,12 @@ pub fn llm_chat_save_system(
                                 .map(|s| images.add(svg_to_image(&s.preview_svg, 128, 128)))
                                 .collect();
                             carousel_state.skin_idx = skin_catalog.skins.len().saturating_sub(1);
+                            chat.add_ai(&format!("Saved to {path}\n✨ Added to the start-menu carousel!"));
                         }
-                        _ => {}
+                        _ => {
+                            chat.add_ai(&format!("Saved to {path}"));
+                        }
                     }
-                    let msg = format!(
-                        "Saved to {path}{}" ,
-                        if kind == "maps" || kind == "skins" { "\n✨ Added to the start-menu carousel!" } else { "" }
-                    );
-                    chat.add_ai(&msg);
                     chat.last_json = None;
                     if let Ok(mut t) = status_q.get_single_mut() {
                         t.sections[0].value = "Saved!".to_owned();
@@ -822,6 +1180,17 @@ pub fn llm_chat_save_system(
                     }
                 }
             }
+        }
+    }
+
+    // ── Command execution (triggered by /confirm) ─────────────────────────────
+    if chat.command_confirmed {
+        let cmd = chat.pending_command.take().unwrap_or_default();
+        chat.command_confirmed = false;
+        let result = apply_command(&cmd, &mut boundary, &mut max_speed, &mut teleport);
+        chat.add_ai(&result);
+        if let Ok(mut t) = status_q.get_single_mut() {
+            t.sections[0].value = "Done!".to_owned();
         }
     }
 }

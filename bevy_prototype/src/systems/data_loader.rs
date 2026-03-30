@@ -215,6 +215,11 @@ impl Default for LlmConfig {
                 "\"first_spawn_time\":float,\"max_count\":int,\"spawn_interval\":float,\"spawn_dist_min\":float,\"spawn_dist_max\":float,\"preview_svg\":\"<svg>...</svg>\"}\n",
                 "For SKIN, shape must be one of: sphere (round body like a planet/planetoid), disc (flat UFO-like), diamond (angular prism), organic (sphere with orbital rings), cylinder (elongated pod).\n",
                 "Colors are [r,g,b] floats in 0.0-1.0 range. Pick vivid, thematic colors.\n",
+                "You can also issue GAME COMMANDS by including a [CMD: command_name arg] token anywhere in your reply. ",
+                "The player will be asked to confirm before the command executes. Available commands:\n",
+                "  [CMD: set_speed <value>]     — change the player's max flight speed (default 40000)\n",
+                "  [CMD: set_boundary <radius>] — resize the play zone (default 100000)\n",
+                "  [CMD: teleport_origin]       — warp the player back to the centre\n",
                 "For all other messages, reply in plain text only \u{2014} no JSON."
             ).into(),
         }

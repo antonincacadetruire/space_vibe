@@ -1,15 +1,13 @@
 use bevy::prelude::*;
 
 use crate::components::{Asteroid, BeltAsteroid, MainCamera, Radius, Velocity, AngularVelocity};
-use crate::resources::{DeathCause, DesertTerrainData, Throttle, SpeedMode, TimePaused, VelocityUpdates, MenuState, Keybindings, PrevCameraPosition, GameState, GameTimer, FreeLook, ZoneBoundary};
+use crate::resources::{DeathCause, DesertTerrainData, Throttle, SpeedMode, TimePaused, VelocityUpdates, MenuState, Keybindings, PrevCameraPosition, GameState, GameTimer, FreeLook, ZoneBoundary, MaxSpeed, TeleportRequest};
 use crate::systems::ui::copilot_chat::LlmChatState;
 
 /// Preset speed values (units/s) for the E/A tap system.
-const PRESET_SPEEDS: [f32; 3] = [5_000.0, 10_000.0, 15_000.0];
-/// Max speed when holding Z/S (units/s).
-const MANUAL_MAX_SPEED: f32 = 15_000.0;
-/// Time (seconds) to accelerate from 0 to MANUAL_MAX_SPEED while holding Z/S.
-const MANUAL_ACCEL_TIME: f32 = 1.5;
+const PRESET_SPEEDS: [f32; 3] = [12_000.0, 26_000.0, 40_000.0];
+/// Time (seconds) to accelerate from 0 to max speed while holding Z/S.
+const MANUAL_ACCEL_TIME: f32 = 2.0;
 /// Time (seconds) to coast from full speed to 0 after releasing Z/S.
 const COAST_DURATION: f32 = 3.5;
 
@@ -25,9 +23,11 @@ pub fn player_movement_system(
     free_look: Res<FreeLook>,
     boundary: Res<ZoneBoundary>,
     chat: Res<LlmChatState>,
+    max_speed: Res<MaxSpeed>,
+    mut teleport: ResMut<TeleportRequest>,
 ) {
-    // Toggle pause via keybinding
-    if keyboard.just_pressed(keyb.toggle_pause) {
+    // Toggle pause via keybinding — blocked while chat is open
+    if keyboard.just_pressed(keyb.toggle_pause) && !chat.open {
         paused.0 = !paused.0;
     }
 
@@ -61,19 +61,19 @@ pub fn player_movement_system(
         speed_mode.manual_active = true;
         speed_mode.preset_step = 0;
 
-        let accel = MANUAL_MAX_SPEED / MANUAL_ACCEL_TIME;
+        let accel = max_speed.0 / MANUAL_ACCEL_TIME;
         if z_held {
-            speed_mode.manual_target = MANUAL_MAX_SPEED;
-            throttle.0 = (throttle.0 + accel * dt).min(MANUAL_MAX_SPEED);
+            speed_mode.manual_target = max_speed.0;
+            throttle.0 = (throttle.0 + accel * dt).min(max_speed.0);
         }
         if s_held {
-            speed_mode.manual_target = -MANUAL_MAX_SPEED;
-            throttle.0 = (throttle.0 - accel * dt).max(-MANUAL_MAX_SPEED);
+            speed_mode.manual_target = -max_speed.0;
+            throttle.0 = (throttle.0 - accel * dt).max(-max_speed.0);
         }
     } else if speed_mode.manual_active {
         // Z/S released → coast to zero
         let decel = throttle.0.abs() / COAST_DURATION.max(0.01);
-        let decel = decel.max(MANUAL_MAX_SPEED / COAST_DURATION); // minimum decel
+        let decel = decel.max(max_speed.0 / COAST_DURATION); // minimum decel
         if throttle.0 > 0.0 {
             throttle.0 = (throttle.0 - decel * dt).max(0.0);
         } else if throttle.0 < 0.0 {
@@ -87,7 +87,7 @@ pub fn player_movement_system(
         // Smoothly approach preset speed
         let idx = (speed_mode.preset_step.unsigned_abs() as usize).clamp(1, 3) - 1;
         let target = PRESET_SPEEDS[idx] * speed_mode.preset_step.signum() as f32;
-        let approach_rate = MANUAL_MAX_SPEED / MANUAL_ACCEL_TIME;
+        let approach_rate = max_speed.0 / MANUAL_ACCEL_TIME;
         if (target - throttle.0).abs() < approach_rate * dt {
             throttle.0 = target;
         } else if target > throttle.0 {
@@ -115,6 +115,12 @@ pub fn player_movement_system(
         transform.translation = transform.translation / dist * boundary.0;
         // Reflect the throttle so the player bounces; also bleed 30 % energy.
         throttle.0 = -(throttle.0 * 0.7);
+    }
+
+    // Teleport request (set by AI command execution).
+    if let Some(pos) = teleport.0.take() {
+        transform.translation = pos;
+        throttle.0 = 0.0;
     }
 }
 

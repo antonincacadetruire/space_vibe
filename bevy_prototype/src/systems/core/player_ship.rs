@@ -475,9 +475,12 @@ pub fn ship_bank_system(
     paused: Res<TimePaused>,
     cam_mode: Res<CameraMode>,
     state: Res<State<GameState>>,
+    free_look: Res<crate::resources::FreeLook>,
 ) {
     if paused.0 || chat.open || *state.get() != GameState::Playing { return; }
     if *cam_mode != CameraMode::ThirdPerson { return; }
+    // In orbit mode the ship position/rotation is handled by orbit_ship_align_system.
+    if free_look.active { return; }
 
     let dt = time.delta_seconds();
 

@@ -81,6 +81,8 @@ fn main() {
         .insert_resource(IdfConfig::default())
         .insert_resource(IdfNextTrains::default())
         .insert_resource(IdfPrimPollTimer::default())
+        .insert_resource(MaxSpeed::default())
+        .insert_resource(TeleportRequest::default())
         // ── Startup ──────────────────────────────────────────────────────────
         .add_systems(Startup, (setup::setup, load_catalogs))
         // ── State enter/exit hooks ───────────────────────────────────────────
@@ -137,6 +139,8 @@ fn main() {
                 player_movement_system.after(mouse_look_system),
                 ship_bank_system.after(player_movement_system),
                 systems::core::camera_view::apply_arm_offset_system.after(player_movement_system),
+                systems::core::camera_view::orbit_ship_align_system
+                    .after(systems::core::camera_view::apply_arm_offset_system),
                 record_camera_position_system.after(systems::core::camera_view::apply_arm_offset_system),
                 ui_update_system.after(player_movement_system),
                 cursor_follow_system.after(ui_update_system),
@@ -156,15 +160,15 @@ fn main() {
             Update,
             (
                 asteroid_collision_system.after(player_movement_system),
-                asteroid_movement_system.after(asteroid_collision_system),
-                missile_spawner_system.after(player_movement_system),
-                missile_movement_system.after(missile_spawner_system),
+                asteroid_movement_system.after(asteroid_collision_system).after(llm_chat_toggle_system),
+                missile_spawner_system.after(player_movement_system).after(llm_chat_toggle_system),
+                missile_movement_system.after(missile_spawner_system).after(llm_chat_toggle_system),
                 danger_hud_system.after(missile_movement_system),
-                desert_terrain_death_system.after(player_movement_system),
-                alien_ship_spawner_system,
-                alien_ship_movement_system.after(alien_ship_spawner_system),
-                alien_ship_shoot_system.after(alien_ship_movement_system),
-                laser_movement_system,
+                desert_terrain_death_system.after(player_movement_system).after(llm_chat_toggle_system),
+                alien_ship_spawner_system.after(llm_chat_toggle_system),
+                alien_ship_movement_system.after(alien_ship_spawner_system).after(llm_chat_toggle_system),
+                alien_ship_shoot_system.after(alien_ship_movement_system).after(llm_chat_toggle_system),
+                laser_movement_system.after(llm_chat_toggle_system),
                 portal_animation_system,
                 explosion_animation_system,
                 health_pip_update_system,
@@ -180,7 +184,7 @@ fn main() {
             Update,
             (
                 follow_sky_dome_system,
-                update_ring_orbit_system,
+                update_ring_orbit_system.after(llm_chat_toggle_system),
                 update_ring_lod_system.after(update_ring_orbit_system),
             )
                 .run_if(in_state(GameState::Playing))
