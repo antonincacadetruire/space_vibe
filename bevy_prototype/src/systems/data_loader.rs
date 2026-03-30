@@ -25,7 +25,7 @@ pub struct MapDef {
 /// Ship coordinate system: -Z = forward (nose), +Z = tail, ±X = wings, +Y = up.
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct SkinPart {
-    /// Primitive: "sphere" | "icosphere" | "box" | "cylinder" | "capsule" | "torus" | "cone"
+    /// Primitive: "sphere" | "half_sphere" | "dome" | "icosphere" | "box" | "cuboid" | "disc" | "cylinder" | "rod" | "capsule" | "torus" | "tube" | "ring" | "cone" | "pyramid" | "wedge"
     pub shape: String,
     /// Center position [x, y, z] in ship-local space.
     #[serde(default)]
@@ -239,6 +239,13 @@ pub struct LlmConfig {
     pub model: String,
     /// System prompt that instructs the model what to generate.
     pub system_prompt: String,
+    /// Maximum tokens requested from the chat completion API.
+    #[serde(default = "default_llm_max_tokens")]
+    pub max_tokens: u32,
+}
+
+fn default_llm_max_tokens() -> u32 {
+    10_000
 }
 
 impl Default for LlmConfig {
@@ -247,6 +254,7 @@ impl Default for LlmConfig {
             api_url: "https://models.inference.ai.azure.com/chat/completions".into(),
             api_key: String::new(),
             model: "gpt-4o".into(),
+            max_tokens: default_llm_max_tokens(),
             system_prompt: concat!(
                 "You are SpaceVibe Copilot, an AI companion for a 3-D space-shooter game built with Bevy (Rust).\n",
                 "Chat freely with the player: answer questions, give flying tips, discuss lore, or just hang out.\n",
@@ -265,15 +273,14 @@ impl Default for LlmConfig {
                 "  SKIN (parts):  {\"id\":\"...\",\"label\":\"...\",\"description\":\"...\",",
                 "\"primary_color\":[r,g,b],\"secondary_color\":[r,g,b],\"emissive_color\":[r,g,b],",
                 "\"preview_svg\":\"<svg.../>\",",
-                "\"parts\":[{\"shape\":\"sphere|icosphere|box|cylinder|capsule|torus|cone\",",
+                "\"parts\":[{\"shape\":\"sphere|half_sphere|dome|icosphere|box|cuboid|disc|cylinder|rod|capsule|torus|tube|ring|cone|pyramid|wedge\",",
                 "\"pos\":[x,y,z],\"rot\":[rx_deg,ry_deg,rz_deg],\"scale\":[sx,sy,sz],",
                 "\"color\":\"hull|accent|glow\",\"color_rgb\":[r,g,b],\"emissive_rgb\":[r,g,b],",
                 "\"metallic\":float,\"roughness\":float,",
                 "\"radius\":float,\"height\":float,\"ring_radius\":float,\"size\":[w,h,d]},...]}\n",
                 "  ENEMY: {\"id\":\"...\",\"label\":\"...\",\"description\":\"...\",\"hull_color\":[r,g,b],\"hull_emissive\":[r,g,b],\"rim_color\":[r,g,b],\"rim_emissive\":[r,g,b],\"dome_color\":[r,g,b],\"dome_emissive\":[r,g,b],",
-                "\"speed_min\":float,\"speed_max\":float,\"health\":int,\"shoot_interval_min\":float,\"shoot_interval_max\":float,",
                 "\"first_spawn_time\":float,\"max_count\":int,\"spawn_interval\":float,\"spawn_dist_min\":float,\"spawn_dist_max\":float,\"preview_svg\":\"<svg>...</svg>\"}\n",
-                "Ship coords for parts: -Z=nose/forward, +Z=tail, ±X=wings, +Y=up. Simple shapes: sphere,disc,diamond,organic,cylinder. Parts primitives: sphere(radius), icosphere(radius), box(size:[w,h,d]), cylinder(radius,height), capsule(radius,height), torus(radius,ring_radius), cone(radius,height — apex at +Y, base at -Y; use rot:[-90,0,0] to point nose forward). rot is Euler degrees [rx,ry,rz] applied XYZ. scale can squash/stretch any primitive. color is hull|accent|glow or use color_rgb:[r,g,b] for explicit per-part color; emissive_rgb adds emission to that part only. Use parts to compose complex ships (butterfly, grapefruit, gun, sword, bottle, animal, etc.).\n",
+                "Ship coords for parts: -Z=nose/forward, +Z=tail, ±X=wings, +Y=up. Simple shapes: sphere,disc,diamond,organic,cylinder. Parts primitives: sphere(radius), half_sphere/dome(radius, flat side on local Y=0 and bulge toward +Y), icosphere(radius), box/cuboid(size:[w,h,d]), disc(radius,height), cylinder/rod(radius,height), capsule(radius,height), torus/tube/ring(radius,ring_radius), cone(radius,height — apex at +Y, base at -Y; use rot:[-90,0,0] to point nose forward), pyramid(size:[w,h,d]), wedge(size:[w,h,d]). rot is Euler degrees [rx,ry,rz] applied XYZ. scale can squash/stretch any primitive. color is hull|accent|glow or use color_rgb:[r,g,b] for explicit per-part color; emissive_rgb adds emission to that part only. Use parts to compose complex ships (butterfly, grapefruit, gun, sword, bottle, animal, wings, claws, fins, blades, teeth, beaks, rocky bases, domes, shells and eyelids).\n",
                 "Colors are [r,g,b] floats in 0.0-1.0 range. Pick vivid, thematic colors.\n",
                 "You can also issue GAME COMMANDS by including a [CMD: command_name arg] token anywhere in your reply. ",
                 "The player will be asked to confirm before the command executes. Available commands:\n",

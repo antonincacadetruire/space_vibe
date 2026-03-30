@@ -333,7 +333,7 @@ pub fn setup_start_menu(
                         NodeBundle {
                             style: Style {
                                 width: Val::Px(800.0),
-                                max_height: Val::Px(180.0),
+                                max_height: Val::Px(280.0),
                                 flex_direction: FlexDirection::Column,
                                 overflow: Overflow::clip_y(),
                                 ..default()

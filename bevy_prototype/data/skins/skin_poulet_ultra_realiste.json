@@ -1,0 +1,28 @@
+{
+  "id": "skin_poulet_ultra_realiste",
+  "label": "Poulet Ultra Réaliste",
+  "description": "Un vaisseau qui ressemble à un poulet entier, avec plumage, ailes, queue, et tête détaillée. Parfait pour semer la terreur dans la basse-cour galactique.",
+  "primary_color": [0.95, 0.85, 0.65],
+  "secondary_color": [1.0, 0.3, 0.0],
+  "emissive_color": [1.0, 0.8, 0.2],
+  "preview_svg": "<svg width='120' height='80' xmlns='http://www.w3.org/2000/svg'><rect width='120' height='80' fill='#050c10'/><ellipse cx='70' cy='40' rx='35' ry='20' fill='rgb(242,217,166)'/><circle cx='35' cy='35' r='10' fill='rgb(242,217,166)'/><polygon points='20,30 35,35 35,45' fill='rgb(255,77,0)'/><ellipse cx='90' cy='45' rx='15' ry='8' fill='rgb(242,217,166)'/><polygon points='50,55 70,65 90,55' fill='rgb(255,77,0)'/><circle cx='33' cy='33' r='3' fill='rgb(255,204,51)'/></svg>",
+  "parts": [
+    {"shape":"capsule","pos":[0,0,0],"rot":[0,0,0],"scale":[1.8,1.0,1.0],"color_rgb":[0.95,0.85,0.65],"emissive_rgb":[0,0,0],"metallic":0.2,"roughness":0.8,"radius":1.2,"height":3.5},
+    {"shape":"sphere","pos":[-2.0,0.4,-0.5],"rot":[0,0,0],"scale":[1.0,1.0,1.0],"color_rgb":[0.95,0.85,0.65],"emissive_rgb":[0,0,0],"metallic":0.2,"roughness":0.8,"radius":1.0},
+    {"shape":"cone","pos":[-2.8,0.2,-0.5],"rot":[0,0,0],"scale":[1.0,1.0,1.0],"color_rgb":[1.0,0.3,0.0],"emissive_rgb":[0,0,0],"metallic":0.0,"roughness":0.9,"radius":0.4,"height":0.8},
+    {"shape":"sphere","pos":[-2.2,0.5,-0.3],"rot":[0,0,0],"scale":[0.2,0.2,0.2],"color_rgb":[0.0,0.0,0.0],"emissive_rgb":[0,0,0],"metallic":0.8,"roughness":0.1,"radius":0.1},
+    {"shape":"half_sphere","pos":[1.5,0.3,0.8],"rot":[0,0,0],"scale":[1.2,0.6,1.0],"color_rgb":[0.95,0.85,0.65],"emissive_rgb":[0,0,0],"metallic":0.2,"roughness":0.8,"radius":1.0},
+    {"shape":"half_sphere","pos":[-1.0,0.3,0.8],"rot":[0,0,0],"scale":[1.2,0.6,1.0],"color_rgb":[0.95,0.85,0.65],"emissive_rgb":[0,0,0],"metallic":0.2,"roughness":0.8,"radius":1.0},
+    {"shape":"wedge","pos":[1.8,-0.2,1.5],"rot":[0,0,20],"scale":[0.8,1.0,1.0],"color_rgb":[1.0,0.3,0.0],"emissive_rgb":[0,0,0],"metallic":0.0,"roughness":0.9,"size":[1.2,0.4,1.5]},
+    {"shape":"wedge","pos":[-1.3,-0.2,1.5],"rot":[0,0,-20],"scale":[0.8,1.0,1.0],"color_rgb":[1.0,0.3,0.0],"emissive_rgb":[0,0,0],"metallic":0.0,"roughness":0.9,"size":[1.2,0.4,1.5]},
+    {"shape":"pyramid","pos":[0.0,-0.8,-1.8],"rot":[0,0,0],"scale":[1.0,1.0,1.0],"color_rgb":[1.0,0.3,0.0],"emissive_rgb":[0,0,0],"metallic":0.0,"roughness":0.9,"size":[1.0,0.6,1.0]},
+    {"shape":"pyramid","pos":[0.5,-0.8,-1.6],"rot":[0,0,0],"scale":[1.0,1.0,1.0],"color_rgb":[1.0,0.3,0.0],"emissive_rgb":[0,0,0],"metallic":0.0,"roughness":0.9,"size":[0.8,0.4,0.8]},
+    {"shape":"pyramid","pos":[-0.5,-0.8,-1.6],"rot":[0,0,0],"scale":[1.0,1.0,1.0],"color_rgb":[1.0,0.3,0.0],"emissive_rgb":[0,0,0],"metallic":0.0,"roughness":0.9,"size":[0.8,0.4,0.8]},
+    {"shape":"capsule","pos":[0.9,-1.0,-0.5],"rot":[0,0,0],"scale":[0.5,0.4,0.5],"color_rgb":[0.95,0.85,0.65],"emissive_rgb":[0,0,0],"metallic":0.2,"roughness":0.8,"radius":0.3,"height":1.0},
+    {"shape":"capsule","pos":[-0.9,-1.0,-0.5],"rot":[0,0,0],"scale":[0.5,0.4,0.5],"color_rgb":[0.95,0.85,0.65],"emissive_rgb":[0,0,0],"metallic":0.2,"roughness":0.8,"radius":0.3,"height":1.0},
+    {"shape":"sphere","pos":[1.0,-1.3,-0.7],"rot":[0,0,0],"scale":[0.15,0.15,0.15],"color_rgb":[1.0,0.3,0.0],"emissive_rgb":[0,0,0],"metallic":0.0,"roughness":0.9,"radius":0.15},
+    {"shape":"sphere","pos":[0.8,-1.3,-0.7],"rot":[0,0,0],"scale":[0.15,0.15,0.15],"color_rgb":[1.0,0.3,0.0],"emissive_rgb":[0,0,0],"metallic":0.0,"roughness":0.9,"radius":0.15},
+    {"shape":"sphere","pos":[-1.0,-1.3,-0.7],"rot":[0,0,0],"scale":[0.15,0.15,0.15],"color_rgb":[1.0,0.3,0.0],"emissive_rgb":[0,0,0],"metallic":0.0,"roughness":0.9,"radius":0.15},
+    {"shape":"sphere","pos":[-0.8,-1.3,-0.7],"rot":[0,0,0],"scale":[0.15,0.15,0.15],"color_rgb":[1.0,0.3,0.0],"emissive_rgb":[0,0,0],"metallic":0.0,"roughness":0.9,"radius":0.15}
+  ]
+}

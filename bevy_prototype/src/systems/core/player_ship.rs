@@ -295,6 +295,10 @@ fn spawn_skin_part(
             let r = part.radius.unwrap_or(0.5);
             meshes.add(Mesh::from(shape::UVSphere { radius: r, sectors: 16, stacks: 10 }))
         }
+        "half_sphere" | "dome" => {
+            let r = part.radius.unwrap_or(0.5);
+            meshes.add(create_half_sphere_mesh(r))
+        }
         "icosphere" => {
             let r = part.radius.unwrap_or(0.5);
             meshes.add(
@@ -302,7 +306,7 @@ fn spawn_skin_part(
                     .unwrap_or_else(|_| Mesh::from(shape::UVSphere { radius: r, sectors: 16, stacks: 10 }))
             )
         }
-        "box" => {
+        "box" | "cuboid" | "rect" => {
             let [sx, sy, sz] = part.size.unwrap_or([1.0, 1.0, 1.0]);
             meshes.add(Mesh::from(shape::Box {
                 min_x: -sx * 0.5, max_x: sx * 0.5,
@@ -310,10 +314,15 @@ fn spawn_skin_part(
                 min_z: -sz * 0.5, max_z: sz * 0.5,
             }))
         }
-        "cylinder" => {
+        "cylinder" | "rod" => {
             let r = part.radius.unwrap_or(0.5);
             let h = part.height.unwrap_or(1.0);
             meshes.add(Mesh::from(shape::Cylinder { radius: r, height: h, resolution: 16, segments: 1 }))
+        }
+        "disc" => {
+            let r = part.radius.unwrap_or(0.8);
+            let h = part.height.unwrap_or(0.2);
+            meshes.add(Mesh::from(shape::Cylinder { radius: r, height: h, resolution: 24, segments: 1 }))
         }
         "capsule" => {
             let r = part.radius.unwrap_or(0.3);
@@ -324,7 +333,7 @@ fn spawn_skin_part(
                 uv_profile: shape::CapsuleUvProfile::Uniform,
             }))
         }
-        "torus" => {
+        "torus" | "tube" | "ring" => {
             let r  = part.radius.unwrap_or(1.0);
             let rr = part.ring_radius.unwrap_or(0.2);
             meshes.add(Mesh::from(shape::Torus {
@@ -336,6 +345,14 @@ fn spawn_skin_part(
             let r = part.radius.unwrap_or(0.5);
             let h = part.height.unwrap_or(1.0);
             meshes.add(create_cone_mesh(r, h))
+        }
+        "pyramid" => {
+            let [sx, sy, sz] = part.size.unwrap_or([1.0, 1.0, 1.0]);
+            meshes.add(create_pyramid_mesh(sx, sy, sz))
+        }
+        "wedge" => {
+            let [sx, sy, sz] = part.size.unwrap_or([1.0, 0.5, 1.5]);
+            meshes.add(create_wedge_mesh(sx, sy, sz))
         }
         _ => meshes.add(Mesh::from(shape::UVSphere { radius: 0.3, sectors: 8, stacks: 6 })),
     };
@@ -439,6 +456,162 @@ fn create_cone_mesh(radius: f32, height: f32) -> Mesh {
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL,   normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0,     uvs);
+    mesh.set_indices(Some(Indices::U32(indices)));
+    mesh
+}
+
+/// Builds a hemisphere whose flat side lies on local Y=0 and dome extends toward +Y.
+/// Use rotation to point the dome in another direction.
+fn create_half_sphere_mesh(radius: f32) -> Mesh {
+    const SECTORS: u32 = 20;
+    const STACKS: u32 = 10;
+
+    let mut positions: Vec<[f32; 3]> = Vec::new();
+    let mut normals: Vec<[f32; 3]> = Vec::new();
+    let mut uvs: Vec<[f32; 2]> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    for stack in 0..=STACKS {
+        let v = stack as f32 / STACKS as f32;
+        let theta = v * std::f32::consts::FRAC_PI_2;
+        let y = theta.cos() * radius;
+        let ring_r = theta.sin() * radius;
+
+        for sector in 0..=SECTORS {
+            let u = sector as f32 / SECTORS as f32;
+            let phi = u * std::f32::consts::TAU;
+            let x = phi.cos() * ring_r;
+            let z = phi.sin() * ring_r;
+            let normal = Vec3::new(x, y, z).normalize_or_zero();
+
+            positions.push([x, y, z]);
+            normals.push([normal.x, normal.y, normal.z]);
+            uvs.push([u, 1.0 - v]);
+        }
+    }
+
+    let row = SECTORS + 1;
+    for stack in 0..STACKS {
+        for sector in 0..SECTORS {
+            let a = stack * row + sector;
+            let b = a + row;
+            indices.extend([a, b, a + 1, a + 1, b, b + 1]);
+        }
+    }
+
+    let cap_center = positions.len() as u32;
+    positions.push([0.0, 0.0, 0.0]);
+    normals.push([0.0, -1.0, 0.0]);
+    uvs.push([0.5, 0.5]);
+
+    let cap_ring_start = positions.len() as u32;
+    for sector in 0..=SECTORS {
+        let u = sector as f32 / SECTORS as f32;
+        let phi = u * std::f32::consts::TAU;
+        let x = phi.cos() * radius;
+        let z = phi.sin() * radius;
+        positions.push([x, 0.0, z]);
+        normals.push([0.0, -1.0, 0.0]);
+        uvs.push([0.5 + x / (2.0 * radius), 0.5 + z / (2.0 * radius)]);
+    }
+
+    for sector in 0..SECTORS {
+        indices.extend([cap_center, cap_ring_start + sector + 1, cap_ring_start + sector]);
+    }
+
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.set_indices(Some(Indices::U32(indices)));
+    mesh
+}
+
+/// Builds a square pyramid with its apex at +Y and base centered on the XZ plane.
+fn create_pyramid_mesh(width: f32, height: f32, depth: f32) -> Mesh {
+    let hw = width * 0.5;
+    let hh = height * 0.5;
+    let hd = depth * 0.5;
+
+    let apex = Vec3::new(0.0, hh, 0.0);
+    let bl = Vec3::new(-hw, -hh, -hd);
+    let br = Vec3::new(hw, -hh, -hd);
+    let fr = Vec3::new(hw, -hh, hd);
+    let fl = Vec3::new(-hw, -hh, hd);
+
+    let mut positions: Vec<[f32; 3]> = Vec::new();
+    let mut normals: Vec<[f32; 3]> = Vec::new();
+    let mut uvs: Vec<[f32; 2]> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    let mut push_tri = |a: Vec3, b: Vec3, c: Vec3| {
+        let base = positions.len() as u32;
+        let normal = (b - a).cross(c - a).normalize_or_zero();
+        for point in [a, b, c] {
+            positions.push([point.x, point.y, point.z]);
+            normals.push([normal.x, normal.y, normal.z]);
+        }
+        uvs.extend([[0.5, 0.0], [0.0, 1.0], [1.0, 1.0]]);
+        indices.extend([base, base + 1, base + 2]);
+    };
+
+    push_tri(apex, bl, br);
+    push_tri(apex, br, fr);
+    push_tri(apex, fr, fl);
+    push_tri(apex, fl, bl);
+    push_tri(bl, fr, br);
+    push_tri(bl, fl, fr);
+
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.set_indices(Some(Indices::U32(indices)));
+    mesh
+}
+
+/// Builds a sloped wedge that is useful for wings, blades, jaws and vehicle noses.
+fn create_wedge_mesh(width: f32, height: f32, depth: f32) -> Mesh {
+    let hw = width * 0.5;
+    let hh = height * 0.5;
+    let hd = depth * 0.5;
+
+    let blf = Vec3::new(-hw, -hh, -hd);
+    let brf = Vec3::new(hw, -hh, -hd);
+    let blb = Vec3::new(-hw, -hh, hd);
+    let brb = Vec3::new(hw, -hh, hd);
+    let tbf = Vec3::new(-hw, hh, -hd);
+    let tff = Vec3::new(hw, hh, -hd);
+
+    let mut positions: Vec<[f32; 3]> = Vec::new();
+    let mut normals: Vec<[f32; 3]> = Vec::new();
+    let mut uvs: Vec<[f32; 2]> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    let mut push_tri = |a: Vec3, b: Vec3, c: Vec3| {
+        let base = positions.len() as u32;
+        let normal = (b - a).cross(c - a).normalize_or_zero();
+        for point in [a, b, c] {
+            positions.push([point.x, point.y, point.z]);
+            normals.push([normal.x, normal.y, normal.z]);
+        }
+        uvs.extend([[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]]);
+        indices.extend([base, base + 1, base + 2]);
+    };
+
+    push_tri(blf, brf, brb);
+    push_tri(blf, brb, blb);
+    push_tri(tbf, tff, brb);
+    push_tri(tbf, brb, blb);
+    push_tri(blf, tbf, blb);
+    push_tri(brf, brb, tff);
+    push_tri(blf, brf, tff);
+    push_tri(blf, tff, tbf);
+
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.set_indices(Some(Indices::U32(indices)));
     mesh
 }

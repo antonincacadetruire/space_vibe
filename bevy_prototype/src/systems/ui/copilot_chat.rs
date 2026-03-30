@@ -420,6 +420,7 @@ fn spawn_llm_request(
     api_key: String,
     model: String,
     system_prompt: String,
+    max_tokens: u32,
     user_message: String,
     slot: ResultSlot,
 ) {
@@ -431,7 +432,7 @@ fn spawn_llm_request(
                 { "role": "user",    "content": user_message  },
             ],
             "temperature": 0.8,
-            "max_tokens": 1500,
+            "max_tokens": max_tokens,
         });
 
         let mut req = ureq::post(&api_url)
@@ -1034,6 +1035,7 @@ pub fn llm_chat_input_system(
             cfg.api_key.clone(),
             cfg.model.clone(),
             cfg.system_prompt.clone(),
+            cfg.max_tokens,
             prompt,
             Arc::clone(&slot),
         );
@@ -1125,7 +1127,7 @@ pub fn llm_chat_poll_system(
                 // Use the same pre-wrapped lines as the scroll system so each entry
                 // is already ≤55 chars — the Text widget won't re-wrap them, keeping
                 // the node's natural height predictable and within the log container.
-                const MAX_VIS_LINES: usize = 25;
+                const MAX_VIS_LINES: usize = 50;
                 const MAX_CHARS: usize = 55;
                 let all_lines = flatten_to_lines(&chat.conversation, MAX_CHARS);
 
