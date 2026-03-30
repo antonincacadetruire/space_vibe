@@ -21,14 +21,58 @@ pub struct MapDef {
     pub preview_svg: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+/// A single geometric primitive used in a composable skin.
+/// Ship coordinate system: -Z = forward (nose), +Z = tail, ±X = wings, +Y = up.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct SkinPart {
+    /// Primitive: "sphere" | "icosphere" | "box" | "cylinder" | "capsule" | "torus" | "cone"
+    pub shape: String,
+    /// Center position [x, y, z] in ship-local space.
+    #[serde(default)]
+    pub pos: Option<[f32; 3]>,
+    /// Euler rotation in DEGREES [rx, ry, rz] applied in XYZ order.
+    #[serde(default)]
+    pub rot: Option<[f32; 3]>,
+    /// Non-uniform scale [x, y, z] — default [1,1,1]. Use to squash/stretch primitives.
+    #[serde(default)]
+    pub scale: Option<[f32; 3]>,
+    /// Named color slot: "hull" (primary_color) | "accent" (secondary_color) | "glow" (emissive_color).
+    /// Overridden by color_rgb when both are set.
+    #[serde(default)]
+    pub color: String,
+    /// Explicit base color [r, g, b] in 0–1 range. Overrides the named `color` slot.
+    #[serde(default)]
+    pub color_rgb: Option<[f32; 3]>,
+    /// Explicit emissive color [r, g, b] in 0–1 range. Makes this part glow independently.
+    #[serde(default)]
+    pub emissive_rgb: Option<[f32; 3]>,
+    /// Material metallic factor (0–1). Falls back to the slot default when absent.
+    #[serde(default)]
+    pub metallic: Option<f32>,
+    /// Material roughness factor (0–1). Falls back to the slot default when absent.
+    #[serde(default)]
+    pub roughness: Option<f32>,
+    /// Radius — sphere / icosphere / cylinder / capsule / torus / cone.
+    #[serde(default)]
+    pub radius: Option<f32>,
+    /// Height — cylinder / capsule / cone.
+    #[serde(default)]
+    pub height: Option<f32>,
+    /// Tube radius — torus.
+    #[serde(default)]
+    pub ring_radius: Option<f32>,
+    /// Full extents [width, height, depth] — box, centered at pos.
+    #[serde(default)]
+    pub size: Option<[f32; 3]>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct SkinDef {
     pub id: String,
     pub label: String,
     pub description: String,
     pub preview_svg: String,
-    /// 3-D ship shape preset: "sphere", "disc", "diamond", "organic", "cylinder"
-    /// Leave empty / omit to get the default war-plane style.
+    /// Simple shape preset — ignored when `parts` is non-empty.
     #[serde(default)]
     pub shape: String,
     /// Main hull colour [r, g, b] in 0.0–1.0 range.
@@ -40,6 +84,9 @@ pub struct SkinDef {
     /// Engine-glow emissive colour [r, g, b] in 0.0–1.0 range.
     #[serde(default)]
     pub emissive_color: Option<[f32; 3]>,
+    /// Composable part list.  When non-empty, `shape` is ignored.
+    #[serde(default)]
+    pub parts: Vec<SkinPart>,
 }
 
 // ── Bevy resources ─────────────────────────────────────────────────────────────
@@ -87,7 +134,7 @@ impl SkinCatalog {
         let data_dir = data_dir().join("skins");
         let mut skins = load_json_dir::<SkinDef>(&data_dir);
 
-        let order = ["war_plane", "banana", "mosquito"];
+        let order = ["war_plane", "banana", "mosquito", "butterfly", "grapefruit", "mushroom_skin", "artichoke_skin", "big_old_flower", "stick_skin_01"];
         skins.sort_by(|a, b| {
             let ai = order.iter().position(|&x| x == a.id).unwrap_or(99);
             let bi = order.iter().position(|&x| x == b.id).unwrap_or(99);
@@ -206,14 +253,22 @@ impl Default for LlmConfig {
                 "Only when the player explicitly asks you to GENERATE or CREATE a map, skin, or enemy, ",
                 "respond with ONLY a single valid JSON object inside a ```json ... ``` code block, using one of these schemas:\n",
                 "  MAP:   {\"id\":\"...\",\"label\":\"...\",\"description\":\"...\",\"boundary_radius\":float,\"accent_color\":[r,g,b],\"preview_svg\":\"<svg>...</svg>\"}\n",
-                "  SKIN:  {\"id\":\"...\",\"label\":\"...\",\"description\":\"...\",",
+                "  SKIN (simple): {\"id\":\"...\",\"label\":\"...\",\"description\":\"...\",",
                 "\"shape\":\"sphere|disc|diamond|organic|cylinder\",",
                 "\"primary_color\":[r,g,b],\"secondary_color\":[r,g,b],\"emissive_color\":[r,g,b],",
-                "\"preview_svg\":\"<svg>...</svg>\"}\n",
+                "\"preview_svg\":\"<svg.../>\"}\n",
+                "  SKIN (parts):  {\"id\":\"...\",\"label\":\"...\",\"description\":\"...\",",
+                "\"primary_color\":[r,g,b],\"secondary_color\":[r,g,b],\"emissive_color\":[r,g,b],",
+                "\"preview_svg\":\"<svg.../>\",",
+                "\"parts\":[{\"shape\":\"sphere|icosphere|box|cylinder|capsule|torus|cone\",",
+                "\"pos\":[x,y,z],\"rot\":[rx_deg,ry_deg,rz_deg],\"scale\":[sx,sy,sz],",
+                "\"color\":\"hull|accent|glow\",\"color_rgb\":[r,g,b],\"emissive_rgb\":[r,g,b],",
+                "\"metallic\":float,\"roughness\":float,",
+                "\"radius\":float,\"height\":float,\"ring_radius\":float,\"size\":[w,h,d]},...]}\n",
                 "  ENEMY: {\"id\":\"...\",\"label\":\"...\",\"description\":\"...\",\"hull_color\":[r,g,b],\"hull_emissive\":[r,g,b],\"rim_color\":[r,g,b],\"rim_emissive\":[r,g,b],\"dome_color\":[r,g,b],\"dome_emissive\":[r,g,b],",
                 "\"speed_min\":float,\"speed_max\":float,\"health\":int,\"shoot_interval_min\":float,\"shoot_interval_max\":float,",
                 "\"first_spawn_time\":float,\"max_count\":int,\"spawn_interval\":float,\"spawn_dist_min\":float,\"spawn_dist_max\":float,\"preview_svg\":\"<svg>...</svg>\"}\n",
-                "For SKIN, shape must be one of: sphere (round body like a planet/planetoid), disc (flat UFO-like), diamond (angular prism), organic (sphere with orbital rings), cylinder (elongated pod).\n",
+                "Ship coords for parts: -Z=nose/forward, +Z=tail, ±X=wings, +Y=up. Simple shapes: sphere,disc,diamond,organic,cylinder. Parts primitives: sphere(radius), icosphere(radius), box(size:[w,h,d]), cylinder(radius,height), capsule(radius,height), torus(radius,ring_radius), cone(radius,height — apex at +Y, base at -Y; use rot:[-90,0,0] to point nose forward). rot is Euler degrees [rx,ry,rz] applied XYZ. scale can squash/stretch any primitive. color is hull|accent|glow or use color_rgb:[r,g,b] for explicit per-part color; emissive_rgb adds emission to that part only. Use parts to compose complex ships (butterfly, grapefruit, war plane, mushroom, bottle, animal, etc.).\n",
                 "Colors are [r,g,b] floats in 0.0-1.0 range. Pick vivid, thematic colors.\n",
                 "You can also issue GAME COMMANDS by including a [CMD: command_name arg] token anywhere in your reply. ",
                 "The player will be asked to confirm before the command executes. Available commands:\n",

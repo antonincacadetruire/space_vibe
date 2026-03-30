@@ -399,15 +399,15 @@ pub enum DeathCause {
     Terrain,
 }
 
-// ── Selectable ship appearance (future skins system) ─────────────────────────
-#[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
-pub enum ShipSkin {
-    #[default]
-    WarPlane,
-    Banana,
-    Mosquito,
-    /// Any AI-generated or custom skin identified by its JSON `id` field.
-    Custom(String),
+// ── Selectable ship appearance ────────────────────────────────────────────────
+/// Active ship skin, identified by the `id` field from its JSON definition in
+/// `data/skins/<id>.json`.  All skins are fully driven by JSON data; there are
+/// no hardcoded variants.
+#[derive(Resource, Debug, Clone, PartialEq, Eq)]
+pub struct ShipSkin(pub String);
+
+impl Default for ShipSkin {
+    fn default() -> Self { ShipSkin("war_plane".to_owned()) }
 }
 
 // ── Maximum distance the player may travel from the scene origin ──────────────
@@ -449,31 +449,6 @@ impl Default for CameraMode {
 /// spring-arm effect. Must be undone before movement and reapplied after.
 #[derive(Resource, Default)]
 pub struct CameraArmOffset(pub Vec3);
-
-#[allow(dead_code)]
-impl ShipSkin {
-    pub fn label(&self) -> String {
-        match self {
-            ShipSkin::WarPlane      => "War Plane".to_owned(),
-            ShipSkin::Banana        => "Banana".to_owned(),
-            ShipSkin::Mosquito      => "Mosquito".to_owned(),
-            ShipSkin::Custom(id)    => id.clone(),
-        }
-    }
-
-    pub fn all() -> &'static [ShipSkin] {
-        &[ShipSkin::WarPlane, ShipSkin::Banana, ShipSkin::Mosquito]
-    }
-
-    pub fn id(&self) -> String {
-        match self {
-            ShipSkin::WarPlane      => "war_plane".to_owned(),
-            ShipSkin::Banana        => "banana".to_owned(),
-            ShipSkin::Mosquito      => "mosquito".to_owned(),
-            ShipSkin::Custom(id)    => id.clone(),
-        }
-    }
-}
 
 // ── Île-de-France transport map configuration ─────────────────────────────────
 

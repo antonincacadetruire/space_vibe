@@ -21,9 +21,9 @@ use std::sync::{Arc, Mutex};
 use crate::components::{
     CopilotChatRoot, CopilotChatBlocker, CopilotChatLog, CopilotInputBox, CopilotInputText,
     CopilotSendButton, CopilotSaveButton, CopilotChangeKeyButton, CopilotStatusText,
-    CopilotScrollThumb,
+    CopilotScrollThumb, CopilotCopyButton,
 };
-use crate::resources::{GameState, ZoneBoundary, MaxSpeed, TeleportRequest};
+use crate::resources::{GameState, ShipSkin, ZoneBoundary, MaxSpeed, TeleportRequest};
 use crate::resources::TimePaused;
 use crate::setup::resolve_ui_font_path;
 use crate::systems::data_loader::{LlmConfigResource, MapCatalog, MapCatalogImages, SkinCatalog, SkinCatalogImages, svg_to_image, CarouselState};
@@ -115,17 +115,24 @@ impl LlmChatState {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Soft-wrap a single text line into segments of at most `max_chars` characters,
-/// breaking on word boundaries where possible.
+/// Soft-wrap a single text line into segments of at most `max_chars` *Unicode
+/// scalar values*, breaking on word boundaries where possible.
 fn soft_wrap_line(line: &str, max_chars: usize) -> Vec<String> {
-    if line.len() <= max_chars {
+    if line.chars().count() <= max_chars {
         return vec![line.to_string()];
     }
     let mut result = Vec::new();
     let mut remaining = line;
-    while remaining.len() > max_chars {
-        // Find last word boundary within max_chars
-        let cut = remaining[..max_chars].rfind(' ').unwrap_or(max_chars);
+    while remaining.chars().count() > max_chars {
+        // Collect the first max_chars chars and find the last space byte-offset within them.
+        let char_boundary: usize = remaining.char_indices()
+            .nth(max_chars)
+            .map(|(i, _)| i)
+            .unwrap_or(remaining.len());
+        let slice = &remaining[..char_boundary];
+        let cut = slice.rfind(' ').unwrap_or(char_boundary);
+        // Avoid infinite loop if there is no space at all.
+        let cut = if cut == 0 { char_boundary } else { cut };
         result.push(remaining[..cut].to_string());
         remaining = remaining[cut..].trim_start_matches(' ');
     }
@@ -468,9 +475,15 @@ fn spawn_llm_request(
 /// Spawns the (initially hidden) chat overlay when entering Playing state.
 pub fn setup_llm_chat_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
     let font = asset_server.load(resolve_ui_font_path());
-    let btn_label = TextStyle { font: font.clone(), font_size: 13.0, color: Color::rgb(0.88, 0.96, 1.00) };
 
-    // ── Full-screen transparent click blocker (behind chat panel) ─────────
+    // ── HUD colour palette ─────────────────────────────────────────────────
+    let cyan_bright  = Color::rgb(0.00, 0.95, 1.00);
+    let cyan_dim     = Color::rgba(0.00, 0.72, 0.85, 0.70);
+    let bg_deep      = Color::rgba(0.01, 0.03, 0.09, 0.97);
+    let bg_log       = Color::rgba(0.00, 0.01, 0.04, 0.88);
+    let border_color = Color::rgba(0.00, 0.62, 0.82, 0.90);
+
+    // ── Full-screen click blocker ──────────────────────────────────────────
     commands.spawn((
         CopilotChatBlocker,
         NodeBundle {
@@ -489,234 +502,332 @@ pub fn setup_llm_chat_ui(mut commands: Commands, asset_server: Res<AssetServer>)
         },
     ));
 
-    // ── Root overlay (covers right portion of screen) ─────────────────────
+    // ── Root outer frame — visible as 2-px HUD border ──────────────────────
     commands
         .spawn((
             CopilotChatRoot,
             NodeBundle {
                 style: Style {
-                    display: Display::None, // starts hidden
+                    display: Display::None,
                     position_type: PositionType::Absolute,
                     right: Val::Px(0.0),
-                    bottom: Val::Px(0.0),
-                    width: Val::Px(460.0),
-                    height: Val::Px(480.0),
+                    top: Val::Px(8.0),
+                    bottom: Val::Px(8.0),
+                    width: Val::Px(504.0),
                     flex_direction: FlexDirection::Column,
-                    padding: UiRect::all(Val::Px(10.0)),
+                    padding: UiRect::all(Val::Px(2.0)), // border thickness
+                    overflow: Overflow::clip(),
+                    min_height: Val::Px(0.0),
                     ..default()
                 },
-                background_color: Color::rgba(0.01, 0.04, 0.07, 0.94).into(),
+                background_color: border_color.into(), // teal "border" peek-through
                 z_index: ZIndex::Global(200),
                 ..default()
             },
         ))
-        .with_children(|root| {
-            // Title bar
-            root.spawn(NodeBundle {
-                style: Style {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(26.0),
-                    margin: UiRect::bottom(Val::Px(4.0)),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::SpaceBetween,
-                    ..default()
-                },
-                ..default()
-            }).with_children(|bar| {
-                bar.spawn(TextBundle::from_section(
-                    "COPILOT  [F2 to close]",
-                    TextStyle { font: font.clone(), font_size: 13.0, color: Color::rgb(0.18, 0.95, 0.98) },
-                ));
-                // Status text (right side of title bar)
-                bar.spawn((
-                    CopilotStatusText,
-                    TextBundle::from_section("", TextStyle {
-                        font: font.clone(), font_size: 12.0,
-                        color: Color::rgb(0.95, 0.75, 0.20),
-                    }),
-                ));
-            });
-
-            // Conversation log (flex-growing) — row: [text | scrollbar]
-            root.spawn(NodeBundle {
+        .with_children(|outer| {
+            // Inner dark panel
+            outer.spawn(NodeBundle {
                 style: Style {
                     flex_grow: 1.0,
-                    width: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Row,
+                    flex_direction: FlexDirection::Column,
+                    padding: UiRect::all(Val::Px(8.0)),
+                    min_height: Val::Px(0.0),
                     overflow: Overflow::clip(),
-                    margin: UiRect::bottom(Val::Px(6.0)),
-                    padding: UiRect::all(Val::Px(6.0)),
                     ..default()
                 },
-                background_color: Color::rgba(0.0, 0.02, 0.04, 0.60).into(),
+                background_color: bg_deep.into(),
                 ..default()
-            }).with_children(|log_row| {
-                // Text column
-                log_row.spawn(NodeBundle {
+            }).with_children(|root| {
+
+                // ── Top accent bar ─────────────────────────────────────────
+                root.spawn(NodeBundle {
+                    style: Style {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(2.0),
+                        margin: UiRect::bottom(Val::Px(5.0)),
+                        ..default()
+                    },
+                    background_color: cyan_bright.into(),
+                    ..default()
+                });
+
+                // ── Title bar ──────────────────────────────────────────────
+                root.spawn(NodeBundle {
+                    style: Style {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(22.0),
+                        margin: UiRect::bottom(Val::Px(4.0)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::SpaceBetween,
+                        ..default()
+                    },
+                    ..default()
+                }).with_children(|bar| {
+                    bar.spawn(TextBundle::from_section(
+                        "◈ COPILOT AI ◈   [F2]",
+                        TextStyle { font: font.clone(), font_size: 14.0, color: cyan_bright },
+                    ));
+                    bar.spawn((
+                        CopilotStatusText,
+                        TextBundle::from_section("", TextStyle {
+                            font: font.clone(), font_size: 12.0,
+                            color: Color::rgb(0.95, 0.82, 0.22),
+                        }),
+                    ));
+                });
+
+                // ── Title separator ────────────────────────────────────────
+                root.spawn(NodeBundle {
+                    style: Style {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(1.0),
+                        margin: UiRect::bottom(Val::Px(6.0)),
+                        ..default()
+                    },
+                    background_color: cyan_dim.into(),
+                    ..default()
+                });
+
+                // ── Conversation log — row: [text | scroll-track] ──────────
+                root.spawn(NodeBundle {
                     style: Style {
                         flex_grow: 1.0,
-                        flex_direction: FlexDirection::Column,
+                        min_height: Val::Px(0.0),
+                        max_height: Val::Percent(100.0),
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Row,
                         overflow: Overflow::clip(),
+                        margin: UiRect::bottom(Val::Px(5.0)),
+                        padding: UiRect::all(Val::Px(6.0)),
                         ..default()
                     },
+                    background_color: bg_log.into(),
                     ..default()
-                }).with_children(|text_col| {
-                    text_col.spawn((
-                        CopilotChatLog,
-                        TextBundle {
-                            text: Text::from_sections(vec![
-                                TextSection::new(
-                                    "[Ask me to generate a map, skin or enemy]\n[Type /setkey YOUR_GITHUB_PAT to set your API key]\n",
-                                    TextStyle { font: font.clone(), font_size: 13.0, color: Color::rgba(0.55, 0.75, 0.80, 0.55) },
-                                ),
-                            ]),
-                            style: Style {
-                                flex_wrap: FlexWrap::Wrap,
-                                ..default()
-                            },
+                }).with_children(|log_row| {
+                    // Text column
+                    log_row.spawn(NodeBundle {
+                        style: Style {
+                            flex_grow: 1.0,
+                            min_height: Val::Px(0.0),
+                            flex_direction: FlexDirection::Column,
+                            overflow: Overflow::clip(),
                             ..default()
                         },
-                    ));
+                        ..default()
+                    }).with_children(|text_col| {
+                        text_col.spawn((
+                            CopilotChatLog,
+                            TextBundle {
+                                text: Text::from_sections(vec![
+                                    TextSection::new(
+                                        "[ SYS ] Ask me to generate a map, skin or enemy.\n[ SYS ] Use /setkey <PAT> to configure API access.\n",
+                                        TextStyle { font: font.clone(), font_size: 13.0, color: Color::rgba(0.28, 0.78, 0.85, 0.55) },
+                                    ),
+                                ]),
+                                style: Style { flex_wrap: FlexWrap::Wrap, ..default() },
+                                ..default()
+                            },
+                        ));
+                    });
+
+                    // Scrollbar track
+                    log_row.spawn(NodeBundle {
+                        style: Style {
+                            width: Val::Px(6.0),
+                            height: Val::Percent(100.0),
+                            flex_shrink: 0.0,
+                            margin: UiRect::left(Val::Px(4.0)),
+                            ..default()
+                        },
+                        background_color: Color::rgba(0.00, 0.16, 0.22, 0.80).into(),
+                        ..default()
+                    }).with_children(|track| {
+                        track.spawn((
+                            CopilotScrollThumb,
+                            NodeBundle {
+                                style: Style {
+                                    position_type: PositionType::Absolute,
+                                    width: Val::Percent(100.0),
+                                    height: Val::Percent(100.0),
+                                    top: Val::Percent(0.0),
+                                    ..default()
+                                },
+                                background_color: Color::rgba(0.05, 0.90, 1.00, 0.95).into(),
+                                ..default()
+                            },
+                        ));
+                    });
                 });
 
-                // Scrollbar track
-                log_row.spawn(NodeBundle {
+                // ── Input separator ────────────────────────────────────────
+                root.spawn(NodeBundle {
                     style: Style {
-                        width: Val::Px(12.0),
-                        height: Val::Percent(100.0),
-                        flex_shrink: 0.0,
-                        margin: UiRect::left(Val::Px(4.0)),
+                        width: Val::Percent(100.0),
+                        height: Val::Px(1.0),
+                        margin: UiRect::bottom(Val::Px(5.0)),
                         ..default()
                     },
-                    background_color: Color::rgba(0.08, 0.18, 0.25, 0.85).into(),
+                    background_color: cyan_dim.into(),
                     ..default()
-                }).with_children(|track| {
-                    // Thumb — position updated each frame by llm_chat_poll_system
-                    track.spawn((
-                        CopilotScrollThumb,
-                        NodeBundle {
-                            style: Style {
-                                position_type: PositionType::Absolute,
-                                width: Val::Percent(100.0),
-                                height: Val::Percent(100.0),
-                                top: Val::Percent(0.0),
-                                ..default()
-                            },
-                            background_color: Color::rgba(0.25, 0.75, 1.0, 0.95).into(),
-                            ..default()
-                        },
-                    ));
                 });
-            });
 
-            // Input row
-            root.spawn(NodeBundle {
-                style: Style {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(34.0),
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(6.0),
-                    margin: UiRect::bottom(Val::Px(4.0)),
+                // ── Input row ─────────────────────────────────────────────
+                root.spawn(NodeBundle {
+                    style: Style {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(34.0),
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(6.0),
+                        margin: UiRect::bottom(Val::Px(5.0)),
+                        ..default()
+                    },
                     ..default()
-                },
-                ..default()
-            }).with_children(|row| {
-                // Input text box
-                row.spawn((
-                    CopilotInputBox,
-                    NodeBundle {
+                }).with_children(|row| {
+                    // Input box — outer node is 1-px teal border
+                    row.spawn(NodeBundle {
                         style: Style {
                             flex_grow: 1.0,
                             height: Val::Px(30.0),
-                            padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                            padding: UiRect::all(Val::Px(1.0)),
                             align_items: AlignItems::Center,
                             ..default()
                         },
-                        background_color: Color::rgba(0.04, 0.14, 0.18, 0.90).into(),
+                        background_color: cyan_dim.into(), // border colour
                         ..default()
-                    },
-                )).with_children(|input_node| {
-                    input_node.spawn((
-                        CopilotInputText,
-                        TextBundle::from_section(
-                            "",
-                            TextStyle { font: font.clone(), font_size: 13.0, color: Color::WHITE },
-                        ),
-                    ));
-                });
+                    }).with_children(|border| {
+                        border.spawn((
+                            CopilotInputBox,
+                            NodeBundle {
+                                style: Style {
+                                    flex_grow: 1.0,
+                                    height: Val::Percent(100.0),
+                                    padding: UiRect::axes(Val::Px(7.0), Val::Px(3.0)),
+                                    align_items: AlignItems::Center,
+                                    ..default()
+                                },
+                                background_color: Color::rgba(0.02, 0.08, 0.13, 0.97).into(),
+                                ..default()
+                            },
+                        )).with_children(|inp| {
+                            inp.spawn((
+                                CopilotInputText,
+                                TextBundle::from_section(
+                                    "",
+                                    TextStyle { font: font.clone(), font_size: 13.0, color: Color::rgb(0.85, 1.00, 1.00) },
+                                ),
+                            ));
+                        });
+                    });
 
-                // Send button
-                row.spawn((
-                    CopilotSendButton,
-                    ButtonBundle {
-                        style: Style {
-                            width: Val::Px(60.0),
-                            height: Val::Px(30.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
+                    // Send button
+                    row.spawn((
+                        CopilotSendButton,
+                        ButtonBundle {
+                            style: Style {
+                                width: Val::Px(62.0),
+                                height: Val::Px(30.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            background_color: Color::rgb(0.00, 0.22, 0.28).into(),
                             ..default()
                         },
-                        background_color: Color::rgb(0.03, 0.20, 0.22).into(),
+                    )).with_children(|btn| {
+                        btn.spawn(TextBundle::from_section(
+                            "SEND",
+                            TextStyle { font: font.clone(), font_size: 13.0, color: cyan_bright },
+                        ));
+                    });
+                });
+
+                // ── Action row (Save / ChangeKey / Copy) ──────────────────
+                root.spawn(NodeBundle {
+                    style: Style {
+                        width: Val::Percent(100.0),
+                        min_height: Val::Px(28.0),
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: Val::Px(5.0),
                         ..default()
                     },
-                )).with_children(|btn| {
-                    btn.spawn(TextBundle::from_section("Send", btn_label.clone()));
-                });
-            });
-
-            // Save row
-            root.spawn(NodeBundle {
-                style: Style {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(30.0),
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(6.0),
                     ..default()
-                },
-                ..default()
-            }).with_children(|row| {
-                row.spawn((
-                    CopilotSaveButton,
-                    ButtonBundle {
-                        style: Style {
-                            display: Display::None, // hidden until a JSON block arrives
-                            width: Val::Px(200.0),
-                            height: Val::Px(26.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
+                }).with_children(|row| {
+                    row.spawn((
+                        CopilotSaveButton,
+                        ButtonBundle {
+                            style: Style {
+                                display: Display::None,
+                                width: Val::Px(160.0),
+                                height: Val::Px(26.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            background_color: Color::rgb(0.02, 0.22, 0.10).into(),
                             ..default()
                         },
-                        background_color: Color::rgb(0.05, 0.28, 0.12).into(),
-                        ..default()
-                    },
-                )).with_children(|btn| {
-                    btn.spawn(TextBundle::from_section(
-                        "Save JSON to data/",
-                        TextStyle { font: font.clone(), font_size: 12.0, color: Color::rgb(0.45, 1.0, 0.60) },
-                    ));
+                    )).with_children(|btn| {
+                        btn.spawn(TextBundle::from_section(
+                            "◼ SAVE JSON",
+                            TextStyle { font: font.clone(), font_size: 12.0, color: Color::rgb(0.40, 1.00, 0.55) },
+                        ));
+                    });
+
+                    row.spawn((
+                        CopilotChangeKeyButton,
+                        ButtonBundle {
+                            style: Style {
+                                width: Val::Px(95.0),
+                                height: Val::Px(26.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            background_color: Color::rgb(0.16, 0.08, 0.02).into(),
+                            ..default()
+                        },
+                    )).with_children(|btn| {
+                        btn.spawn(TextBundle::from_section(
+                            "CHG KEY",
+                            TextStyle { font: font.clone(), font_size: 12.0, color: Color::rgb(1.0, 0.72, 0.22) },
+                        ));
+                    });
+
+                    row.spawn((
+                        CopilotCopyButton,
+                        ButtonBundle {
+                            style: Style {
+                                width: Val::Px(130.0),
+                                height: Val::Px(26.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            background_color: Color::rgb(0.00, 0.16, 0.22).into(),
+                            ..default()
+                        },
+                    )).with_children(|btn| {
+                        btn.spawn(TextBundle::from_section(
+                            "◈ COPY REPLY",
+                            TextStyle { font: font.clone(), font_size: 12.0, color: cyan_bright },
+                        ));
+                    });
                 });
 
-                // Change API key button (always visible)
-                row.spawn((
-                    CopilotChangeKeyButton,
-                    ButtonBundle {
-                        style: Style {
-                            width: Val::Px(100.0),
-                            height: Val::Px(26.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        background_color: Color::rgb(0.18, 0.10, 0.04).into(),
+                // ── Bottom accent bar ──────────────────────────────────────
+                root.spawn(NodeBundle {
+                    style: Style {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(2.0),
+                        margin: UiRect::top(Val::Px(5.0)),
                         ..default()
                     },
-                )).with_children(|btn| {
-                    btn.spawn(TextBundle::from_section(
-                        "Change Key",
-                        TextStyle { font: font.clone(), font_size: 12.0, color: Color::rgb(1.0, 0.75, 0.30) },
-                    ));
+                    background_color: cyan_bright.into(),
+                    ..default()
                 });
             });
         });
@@ -1011,24 +1122,12 @@ pub fn llm_chat_poll_system(
                     TextStyle { font: font.clone(), font_size: 13.0, color: Color::rgba(0.55, 0.75, 0.80, 0.55) },
                 )];
             } else {
-                // Flatten all messages into individual lines for smooth line-based scrolling.
-                const MAX_VIS_LINES: usize = 35;
-                // Build flat list: (line_text, is_user)
-                let mut all_lines: Vec<(String, bool)> = Vec::new();
-                for msg in &chat.conversation {
-                    let color_owner = msg.is_user;
-                    let prefix = if msg.is_user { "You: " } else { "AI:  " };
-                    let full = format!("{prefix}{}", msg.text);
-                    let sub: Vec<&str> = full.lines().collect();
-                    for (i, line) in sub.iter().enumerate() {
-                        if i == 0 {
-                            all_lines.push((line.to_string(), color_owner));
-                        } else {
-                            all_lines.push((format!("     {line}"), color_owner));
-                        }
-                    }
-                    all_lines.push((String::new(), color_owner)); // blank spacer between messages
-                }
+                // Use the same pre-wrapped lines as the scroll system so each entry
+                // is already ≤55 chars — the Text widget won't re-wrap them, keeping
+                // the node's natural height predictable and within the log container.
+                const MAX_VIS_LINES: usize = 25;
+                const MAX_CHARS: usize = 55;
+                let all_lines = flatten_to_lines(&chat.conversation, MAX_CHARS);
 
                 let total_lines = all_lines.len();
                 let skip = chat.scroll_offset.min(total_lines.saturating_sub(1));
@@ -1060,8 +1159,8 @@ pub fn llm_chat_poll_system(
     }
 
     // Update scrollbar thumb — same line count as the display.
-    const MAX_VIS_LINES: usize = 35;
-    const MAX_CHARS: usize = 60;
+    const MAX_VIS_LINES: usize = 25;
+    const MAX_CHARS: usize = 55;
     let total_lines = flatten_to_lines(&chat.conversation, MAX_CHARS).len();
     if let Ok(mut thumb) = scroll_thumb_q.get_single_mut() {
         if total_lines <= MAX_VIS_LINES {
@@ -1092,8 +1191,8 @@ pub fn llm_chat_scroll_system(
             bevy::input::mouse::MouseScrollUnit::Line  => (ev.y * 3.0) as i32,
             bevy::input::mouse::MouseScrollUnit::Pixel => (ev.y / 15.0) as i32,
         };
-        let total_lines: usize = flatten_to_lines(&chat.conversation, 60).len();
-        const MAX_VIS_LINES: usize = 35;
+        let total_lines: usize = flatten_to_lines(&chat.conversation, 55).len();
+        const MAX_VIS_LINES: usize = 25;
         let max_offset = total_lines.saturating_sub(MAX_VIS_LINES);
         // Scroll up (positive delta) → increase offset (show older lines)
         let new_offset = (chat.scroll_offset as i32 - delta)
@@ -1108,6 +1207,7 @@ pub fn llm_chat_save_system(
     mut chat: ResMut<LlmChatState>,
     interaction_q: Query<&Interaction, (Changed<Interaction>, With<CopilotSaveButton>)>,
     change_key_q: Query<&Interaction, (Changed<Interaction>, With<CopilotChangeKeyButton>)>,
+    copy_btn_q: Query<&Interaction, (Changed<Interaction>, With<CopilotCopyButton>)>,
     mut status_q: Query<&mut Text, (With<CopilotStatusText>, Without<CopilotChatLog>, Without<CopilotInputText>)>,
     mut map_catalog: ResMut<MapCatalog>,
     mut map_images: ResMut<MapCatalogImages>,
@@ -1115,6 +1215,7 @@ pub fn llm_chat_save_system(
     mut skin_images: ResMut<SkinCatalogImages>,
     mut images: ResMut<Assets<Image>>,
     mut carousel_state: ResMut<CarouselState>,
+    mut ship_skin: ResMut<ShipSkin>,
     mut boundary: ResMut<ZoneBoundary>,
     mut max_speed: ResMut<MaxSpeed>,
     mut teleport: ResMut<TeleportRequest>,
@@ -1124,6 +1225,22 @@ pub fn llm_chat_save_system(
         if *interaction != Interaction::Pressed { continue; }
         chat.awaiting_api_key = true;
         chat.add_ai("Please paste your new GitHub Personal Access Token (PAT):");
+    }
+
+    // ── Copy last AI response button
+    for interaction in &copy_btn_q {
+        if *interaction != Interaction::Pressed { continue; }
+        let last_ai = chat.conversation.iter().rev()
+            .find(|m| !m.is_user)
+            .map(|m| m.text.clone());
+        if let Some(text) = last_ai {
+            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                let _ = clipboard.set_text(text);
+                if let Ok(mut t) = status_q.get_single_mut() {
+                    t.sections[0].value = "Copied!".to_owned();
+                }
+            }
+        }
     }
     for interaction in &interaction_q {
         if *interaction != Interaction::Pressed { continue; }
@@ -1161,7 +1278,11 @@ pub fn llm_chat_save_system(
                                 .map(|s| images.add(svg_to_image(&s.preview_svg, 128, 128)))
                                 .collect();
                             carousel_state.skin_idx = skin_catalog.skins.len().saturating_sub(1);
-                            chat.add_ai(&format!("Saved to {path}\n✨ Added to the start-menu carousel!"));
+                            // Also update the active skin so the ship rebuilds on next play.
+                            if let Some(new_skin) = skin_catalog.skins.last() {
+                                *ship_skin = ShipSkin(new_skin.id.clone());
+                            }
+                            chat.add_ai(&format!("Saved to {path}\n✨ Added to start-menu carousel & set as active skin!"));
                         }
                         _ => {
                             chat.add_ai(&format!("Saved to {path}"));

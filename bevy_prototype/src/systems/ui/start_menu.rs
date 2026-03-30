@@ -762,13 +762,11 @@ pub fn start_menu_carousel_system(
 
     if skin_changed {
         let idx = carousel_state.skin_idx;
-        *ship_skin = match skin_catalog.skins.get(idx).map(|s| s.id.as_str()) {
-            Some("banana")    => ShipSkin::Banana,
-            Some("mosquito")  => ShipSkin::Mosquito,
-            Some("war_plane") => ShipSkin::WarPlane,
-            Some(id)          => ShipSkin::Custom(id.to_owned()),
-            None              => ShipSkin::WarPlane,
-        };
+        *ship_skin = ShipSkin(
+            skin_catalog.skins.get(idx)
+                .map(|s| s.id.clone())
+                .unwrap_or_else(|| "war_plane".to_owned()),
+        );
         if let Some(s) = skin_catalog.skins.get(idx) {
             let label = s.label.clone();
             let desc  = s.description.clone();

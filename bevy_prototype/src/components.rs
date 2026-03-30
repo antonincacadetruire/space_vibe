@@ -215,6 +215,8 @@ pub struct PlayerShipModel;
 #[derive(Component)] pub struct CopilotMenuButton;
 /// Thumb of the conversation scrollbar (positioned absolutely inside the track).
 #[derive(Component)] pub struct CopilotScrollThumb;
+/// Button to copy the last AI response to clipboard.
+#[derive(Component)] pub struct CopilotCopyButton;
 
 // ── IDF station selection dropdown UI ────────────────────────────────────────
 /// Root node for the station picker panel (visible only when IDF map selected).

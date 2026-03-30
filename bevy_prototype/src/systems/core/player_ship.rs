@@ -1,9 +1,10 @@
 use bevy::prelude::*;
 use bevy::input::mouse::MouseMotion;
+use bevy::render::mesh::{Indices, PrimitiveTopology};
 
 use crate::components::{MainCamera, PlayerShipModel, SceneEntity};
 use crate::resources::{CameraMode, GameState, TimePaused};
-use crate::systems::data_loader::SkinCatalog;
+use crate::systems::data_loader::{SkinCatalog, SkinDef, SkinPart};
 use crate::systems::ui::copilot_chat::LlmChatState;
 
 /// Resource holding the current roll angle of the player ship (radians).
@@ -13,13 +14,9 @@ pub struct ShipRollState {
     pub current_roll: f32,
 }
 
-/// Spawns a procedural war-plane model as a child of the main camera.
-/// The ship sits slightly in front of and below the camera so the player can
-/// always see it — giving a third-person-behind-the-cockpit perspective.
-///
-/// The model uses only Bevy primitive shapes (no external assets) so it works
-/// out of the box.  In the future, swap `build_war_plane` for other builders
-/// to implement different `ShipSkin` options.
+/// Spawns the player ship as a child of the main camera.
+/// The ship is entirely driven by the active skin's JSON definition
+/// (`data/skins/<id>.json`).  No skin-specific code exists here.
 pub fn spawn_player_ship_system(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -30,131 +27,27 @@ pub fn spawn_player_ship_system(
     skin_catalog: Res<SkinCatalog>,
 ) {
     let Ok(camera_entity) = camera_q.get_single() else { return };
-    // Ship starts visible in ThirdPerson mode, hidden in FirstPerson.
     let initial_vis = if *cam_mode == CameraMode::ThirdPerson {
         Visibility::Inherited
     } else {
         Visibility::Hidden
     };
 
-    // ── Materials ─────────────────────────────────────────────────────────────
-    let hull = materials.add(StandardMaterial {
-        base_color: Color::rgb(0.20, 0.22, 0.26),
-        metallic: 0.85,
-        perceptual_roughness: 0.25,
-        reflectance: 0.6,
-        ..default()
-    });
+    // Look up the skin definition by id; fall back to a default so the ship
+    // always spawns even if the JSON file is missing or the id is unknown.
+    let fallback = SkinDef::default();
+    let skin_def = skin_catalog.by_id(&ship_skin.0).unwrap_or(&fallback);
 
-    let accent = materials.add(StandardMaterial {
-        base_color: Color::rgb(0.55, 0.10, 0.10),
-        metallic: 0.7,
-        perceptual_roughness: 0.35,
-        ..default()
-    });
+    let hull_color = skin_def.primary_color
+        .map(|[r, g, b]| Color::rgb(r, g, b))
+        .unwrap_or(Color::rgb(0.20, 0.22, 0.26));
+    let accent_color = skin_def.secondary_color
+        .map(|[r, g, b]| Color::rgb(r, g, b))
+        .unwrap_or(Color::rgb(0.55, 0.10, 0.10));
+    let glow_color = skin_def.emissive_color
+        .map(|[r, g, b]| Color::rgb(r, g, b))
+        .unwrap_or(Color::rgb(0.20, 0.55, 1.00));
 
-    let cockpit = materials.add(StandardMaterial {
-        base_color: Color::rgba(0.08, 0.55, 0.90, 0.75),
-        emissive: Color::rgb(0.0, 0.30, 0.65),
-        metallic: 0.2,
-        perceptual_roughness: 0.05,
-        alpha_mode: AlphaMode::Blend,
-        ..default()
-    });
-
-    let engine_glow = materials.add(StandardMaterial {
-        base_color: Color::rgb(0.20, 0.55, 1.00),
-        emissive: Color::rgb(0.40, 1.20, 2.50),
-        metallic: 0.0,
-        perceptual_roughness: 0.8,
-        ..default()
-    });
-
-    // ── Mesh helpers ──────────────────────────────────────────────────────────
-    // The ship coordinate system: nose at -Z (forward), tail at +Z (toward cam).
-    // Ship root is at (0, -1.5, -10) in camera-local space, putting the tail
-    // ~7 units ahead of the camera so the player always sees the whole aircraft.
-
-    // ── Custom (AI-generated) skins — build from SkinDef shape/color fields ─────
-    if let crate::resources::ShipSkin::Custom(ref skin_id) = *ship_skin {
-        let skin_def = skin_catalog.by_id(skin_id);
-        let shape_name = skin_def.map(|s| s.shape.as_str()).unwrap_or("sphere");
-        let hull_color = skin_def
-            .and_then(|s| s.primary_color)
-            .map(|[r, g, b]| Color::rgb(r, g, b))
-            .unwrap_or(Color::rgb(0.30, 0.50, 0.80));
-        let accent_color = skin_def
-            .and_then(|s| s.secondary_color)
-            .map(|[r, g, b]| Color::rgb(r, g, b))
-            .unwrap_or(Color::rgb(0.80, 0.30, 0.20));
-        let glow_color = skin_def
-            .and_then(|s| s.emissive_color)
-            .map(|[r, g, b]| Color::rgb(r, g, b))
-            .unwrap_or(Color::rgb(0.40, 1.00, 2.00));
-
-        let custom_hull = materials.add(StandardMaterial {
-            base_color: hull_color,
-            metallic: 0.70,
-            perceptual_roughness: 0.30,
-            ..default()
-        });
-        let custom_accent = materials.add(StandardMaterial {
-            base_color: accent_color,
-            metallic: 0.60,
-            perceptual_roughness: 0.40,
-            ..default()
-        });
-        let custom_glow = materials.add(StandardMaterial {
-            base_color: glow_color,
-            emissive: glow_color,
-            metallic: 0.00,
-            perceptual_roughness: 0.80,
-            ..default()
-        });
-
-        let custom_root = commands
-            .spawn((
-                SpatialBundle {
-                    visibility: initial_vis,
-                    transform: Transform::from_xyz(0.0, -1.5, -10.0),
-                    ..default()
-                },
-                PlayerShipModel,
-                SceneEntity,
-            ))
-            .id();
-
-        build_custom_ship(shape_name, custom_root, &mut commands, &mut meshes, custom_hull, custom_accent, custom_glow);
-        commands.entity(camera_entity).push_children(&[custom_root]);
-        return;
-    }
-
-    // Currently only one skin available; keep structure for future variants
-    let fuselage_mesh = match *ship_skin {
-        crate::resources::ShipSkin::WarPlane => meshes.add(Mesh::from(shape::Box {
-            min_x: -0.50, max_x: 0.50,
-            min_y: -0.32, max_y: 0.32,
-            min_z: -5.00, max_z: 3.00,
-        })),
-        crate::resources::ShipSkin::Banana => meshes.add(Mesh::from(shape::Capsule {
-            radius: 0.35,
-            rings: 4,
-            depth: 4.0,
-            latitudes: 8,
-            longitudes: 8,
-            uv_profile: shape::CapsuleUvProfile::Uniform,
-        })),
-        crate::resources::ShipSkin::Mosquito => meshes.add(Mesh::from(shape::Box {
-            min_x: -0.28, max_x: 0.28,
-            min_y: -0.28, max_y: 0.28,
-            min_z: -3.80, max_z: 2.50,
-        })),
-        crate::resources::ShipSkin::Custom(_) => unreachable!(),
-    };
-
-    // ── Hierarchy ─────────────────────────────────────────────────────────────
-    // Root sits in camera-local space.  Receiving SceneEntity means it is
-    // cleaned up automatically by despawn_scene_entities on OnExit(Playing).
     let root = commands
         .spawn((
             SpatialBundle {
@@ -167,141 +60,55 @@ pub fn spawn_player_ship_system(
         ))
         .id();
 
-    let fuselage = commands.spawn(PbrBundle { mesh: fuselage_mesh, material: hull.clone(), ..default() }).id();
-
-    match *ship_skin {
-        crate::resources::ShipSkin::WarPlane => {
-            // Main delta wings (slightly swept back)
-            let wings_mesh = meshes.add(Mesh::from(shape::Box {
-                min_x: -5.50, max_x: 5.50,
-                min_y: -0.10, max_y: 0.10,
-                min_z: -0.50, max_z: 2.00,
-            }));
-            // Vertical tail fin
-            let vtail_mesh = meshes.add(Mesh::from(shape::Box {
-                min_x: -0.10, max_x: 0.10,
-                min_y:  0.30, max_y: 2.00,
-                min_z:  1.60, max_z: 3.00,
-            }));
-            // Horizontal stabiliser
-            let htail_mesh = meshes.add(Mesh::from(shape::Box {
-                min_x: -2.50, max_x: 2.50,
-                min_y: -0.10, max_y: 0.10,
-                min_z:  2.00, max_z: 3.00,
-            }));
-            // Nose cone
-            let nose_mesh = meshes.add(Mesh::from(shape::Box {
-                min_x: -0.42, max_x: 0.42,
-                min_y: -0.28, max_y: 0.28,
-                min_z: -5.10, max_z: -3.80,
-            }));
-            // Cockpit canopy
-            let canopy_mesh = meshes.add(Mesh::from(shape::Box {
-                min_x: -0.34, max_x: 0.34,
-                min_y:  0.28, max_y: 0.75,
-                min_z: -3.60, max_z: -1.20,
-            }));
-            // Dual engine nozzles
-            let nozzle_mesh = meshes.add(Mesh::from(shape::UVSphere { radius: 0.38, sectors: 8, stacks: 5 }));
-
-            let wings  = commands.spawn(PbrBundle { mesh: wings_mesh,  material: hull.clone(), ..default() }).id();
-            let vtail  = commands.spawn(PbrBundle { mesh: vtail_mesh,  material: hull.clone(), ..default() }).id();
-            let htail  = commands.spawn(PbrBundle { mesh: htail_mesh,  material: hull.clone(), ..default() }).id();
-            let nose   = commands.spawn(PbrBundle { mesh: nose_mesh,   material: accent.clone(), ..default() }).id();
-            let canopy = commands.spawn(PbrBundle { mesh: canopy_mesh, material: cockpit, ..default() }).id();
-            let nozzle_l = commands.spawn(PbrBundle {
-                mesh: nozzle_mesh.clone(),
-                material: engine_glow.clone(),
-                transform: Transform::from_xyz(-0.30, -0.10, 3.25),
-                ..default()
-            }).id();
-            let nozzle_r = commands.spawn(PbrBundle {
-                mesh: nozzle_mesh,
-                material: engine_glow,
-                transform: Transform::from_xyz(0.30, -0.10, 3.25),
-                ..default()
-            }).id();
-            commands.entity(root).push_children(&[fuselage, wings, vtail, htail, nose, canopy, nozzle_l, nozzle_r]);
-        }
-
-        crate::resources::ShipSkin::Banana => {
-            // Two tiny spheres as "the tips" of the banana
-            let tip_mesh = meshes.add(Mesh::from(shape::UVSphere { radius: 0.22, sectors: 8, stacks: 6 }));
-            let tip_front = commands.spawn(PbrBundle {
-                mesh: tip_mesh.clone(),
-                material: accent.clone(),
-                transform: Transform::from_xyz(0.0, 0.25, -2.3),
-                ..default()
-            }).id();
-            let tip_back = commands.spawn(PbrBundle {
-                mesh: tip_mesh,
-                material: accent,
-                transform: Transform::from_xyz(0.0, -0.25, 2.3),
-                ..default()
-            }).id();
-            // Engine glow at tail
-            let nozzle_mesh = meshes.add(Mesh::from(shape::UVSphere { radius: 0.28, sectors: 8, stacks: 5 }));
-            let nozzle = commands.spawn(PbrBundle {
-                mesh: nozzle_mesh,
-                material: engine_glow,
-                transform: Transform::from_xyz(0.0, -0.10, 2.8),
-                ..default()
-            }).id();
-            commands.entity(root).push_children(&[fuselage, tip_front, tip_back, nozzle]);
-        }
-
-        crate::resources::ShipSkin::Mosquito => {
-            // Thin needle-like nose spike
-            let spike_mesh = meshes.add(Mesh::from(shape::Box {
-                min_x: -0.06, max_x: 0.06,
-                min_y: -0.06, max_y: 0.06,
-                min_z: -6.50, max_z: -3.80,
-            }));
-            // Wide transparent wings (dragonfly-style)
-            let wing_mesh = meshes.add(Mesh::from(shape::Box {
-                min_x: -7.0,  max_x: 7.0,
-                min_y: -0.05, max_y: 0.05,
-                min_z: -1.50, max_z: 0.50,
-            }));
-            // Abdomen (rear body extension)
-            let abdomen_mesh = meshes.add(Mesh::from(shape::Box {
-                min_x: -0.16, max_x: 0.16,
-                min_y: -0.16, max_y: 0.16,
-                min_z:  2.50, max_z: 6.00,
-            }));
-            let spike   = commands.spawn(PbrBundle { mesh: spike_mesh,   material: accent.clone(), ..default() }).id();
-            let wings   = commands.spawn(PbrBundle { mesh: wing_mesh,    material: cockpit, ..default() }).id();
-            let abdomen = commands.spawn(PbrBundle { mesh: abdomen_mesh, material: hull.clone(), ..default() }).id();
-            let nozzle_mesh = meshes.add(Mesh::from(shape::UVSphere { radius: 0.20, sectors: 8, stacks: 5 }));
-            let nozzle = commands.spawn(PbrBundle {
-                mesh: nozzle_mesh,
-                material: engine_glow,
-                transform: Transform::from_xyz(0.0, 0.0, 2.5),
-                ..default()
-            }).id();
-            commands.entity(root).push_children(&[fuselage, spike, wings, abdomen, nozzle]);
-        }
-
-        crate::resources::ShipSkin::Custom(_) => unreachable!(),
-    }
-
-    // Attach ship tree to the camera so it moves/rotates with it.
+    build_ship_from_skin_def(skin_def, root, &mut commands, &mut meshes, &mut materials, hull_color, accent_color, glow_color);
     commands.entity(camera_entity).push_children(&[root]);
 }
 
-// ── Custom ship builder ────────────────────────────────────────────────────────
+// ── Unified JSON-driven ship builder ──────────────────────────────────────────
 
-/// Build a procedural ship shape into `root` based on the skin's `shape` field.
-fn build_custom_ship(
-    shape: &str,
+/// Build a procedural 3-D ship into `root` from a `SkinDef`.
+/// When `parts` is non-empty each part spawns with its own material derived
+/// from per-part color overrides; otherwise a shape preset is used.
+fn build_ship_from_skin_def(
+    skin: &SkinDef,
     root: Entity,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
-    hull_mat: Handle<StandardMaterial>,
-    accent_mat: Handle<StandardMaterial>,
-    glow_mat: Handle<StandardMaterial>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    hull_color: Color,
+    accent_color: Color,
+    glow_color: Color,
 ) {
-    match shape {
+    // Parts-based composable skin — each part creates its own material.
+    if !skin.parts.is_empty() {
+        for part in &skin.parts {
+            spawn_skin_part(part, root, commands, meshes, materials, hull_color, accent_color, glow_color);
+        }
+        return;
+    }
+
+    // Pre-create shared materials for the legacy preset shapes.
+    let hull_mat = materials.add(StandardMaterial {
+        base_color: hull_color,
+        metallic: 0.70,
+        perceptual_roughness: 0.30,
+        ..default()
+    });
+    let accent_mat = materials.add(StandardMaterial {
+        base_color: accent_color,
+        metallic: 0.60,
+        perceptual_roughness: 0.40,
+        ..default()
+    });
+    let glow_mat = materials.add(StandardMaterial {
+        base_color: glow_color,
+        emissive: glow_color,
+        metallic: 0.00,
+        perceptual_roughness: 0.80,
+        ..default()
+    });
+
+    match skin.shape.as_str() {
         "disc" | "ufo" => {
             // Flat disc body + dome on top
             let disc = commands.spawn(PbrBundle {
@@ -460,6 +267,180 @@ fn build_custom_ship(
             commands.entity(root).push_children(&[sphere, ring, nozzle_l, nozzle_r]);
         }
     }
+}
+
+/// Spawns a single geometric part as a child of `root`, creating a
+/// per-part material that respects color_rgb / emissive_rgb overrides.
+fn spawn_skin_part(
+    part: &SkinPart,
+    root: Entity,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    hull_color: Color,
+    accent_color: Color,
+    glow_color: Color,
+) {
+    let material = build_part_material(part, materials, hull_color, accent_color, glow_color);
+
+    let pos   = part.pos.map(|[x, y, z]| Vec3::new(x, y, z)).unwrap_or(Vec3::ZERO);
+    let rot   = part.rot.map(|[rx, ry, rz]| {
+        Quat::from_euler(EulerRot::XYZ, rx.to_radians(), ry.to_radians(), rz.to_radians())
+    }).unwrap_or(Quat::IDENTITY);
+    let scale = part.scale.map(|[x, y, z]| Vec3::new(x, y, z)).unwrap_or(Vec3::ONE);
+    let transform = Transform { translation: pos, rotation: rot, scale };
+
+    let mesh = match part.shape.as_str() {
+        "sphere" => {
+            let r = part.radius.unwrap_or(0.5);
+            meshes.add(Mesh::from(shape::UVSphere { radius: r, sectors: 16, stacks: 10 }))
+        }
+        "icosphere" => {
+            let r = part.radius.unwrap_or(0.5);
+            meshes.add(
+                Mesh::try_from(shape::Icosphere { radius: r, subdivisions: 3 })
+                    .unwrap_or_else(|_| Mesh::from(shape::UVSphere { radius: r, sectors: 16, stacks: 10 }))
+            )
+        }
+        "box" => {
+            let [sx, sy, sz] = part.size.unwrap_or([1.0, 1.0, 1.0]);
+            meshes.add(Mesh::from(shape::Box {
+                min_x: -sx * 0.5, max_x: sx * 0.5,
+                min_y: -sy * 0.5, max_y: sy * 0.5,
+                min_z: -sz * 0.5, max_z: sz * 0.5,
+            }))
+        }
+        "cylinder" => {
+            let r = part.radius.unwrap_or(0.5);
+            let h = part.height.unwrap_or(1.0);
+            meshes.add(Mesh::from(shape::Cylinder { radius: r, height: h, resolution: 16, segments: 1 }))
+        }
+        "capsule" => {
+            let r = part.radius.unwrap_or(0.3);
+            let d = part.height.unwrap_or(1.0);
+            meshes.add(Mesh::from(shape::Capsule {
+                radius: r, rings: 4, depth: d,
+                latitudes: 8, longitudes: 8,
+                uv_profile: shape::CapsuleUvProfile::Uniform,
+            }))
+        }
+        "torus" => {
+            let r  = part.radius.unwrap_or(1.0);
+            let rr = part.ring_radius.unwrap_or(0.2);
+            meshes.add(Mesh::from(shape::Torus {
+                radius: r, ring_radius: rr,
+                subdivisions_segments: 24, subdivisions_sides: 6,
+            }))
+        }
+        "cone" => {
+            let r = part.radius.unwrap_or(0.5);
+            let h = part.height.unwrap_or(1.0);
+            meshes.add(create_cone_mesh(r, h))
+        }
+        _ => meshes.add(Mesh::from(shape::UVSphere { radius: 0.3, sectors: 8, stacks: 6 })),
+    };
+
+    let child = commands.spawn(PbrBundle { mesh, material, transform, ..default() }).id();
+    commands.entity(root).push_children(&[child]);
+}
+
+/// Builds a `StandardMaterial` for a single skin part, honouring per-part
+/// color_rgb / emissive_rgb / metallic / roughness overrides before falling
+/// back to the named colour slot defaults.
+fn build_part_material(
+    part: &SkinPart,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    hull_color: Color,
+    accent_color: Color,
+    glow_color: Color,
+) -> Handle<StandardMaterial> {
+    let (slot_base, slot_emissive, slot_metallic, slot_roughness): (Color, Color, f32, f32) =
+        match part.color.as_str() {
+            "accent" => (accent_color, Color::BLACK, 0.60, 0.40),
+            "glow"   => (glow_color,  glow_color,   0.00, 0.80),
+            _        => (hull_color,  Color::BLACK,  0.70, 0.30),
+        };
+
+    let base_color = part.color_rgb
+        .map(|[r, g, b]| Color::rgb(r, g, b))
+        .unwrap_or(slot_base);
+
+    let emissive = part.emissive_rgb
+        .map(|[r, g, b]| Color::rgb(r, g, b))
+        .unwrap_or(slot_emissive);
+
+    materials.add(StandardMaterial {
+        base_color,
+        emissive,
+        metallic:             part.metallic.unwrap_or(slot_metallic),
+        perceptual_roughness: part.roughness.unwrap_or(slot_roughness),
+        ..default()
+    })
+}
+
+/// Builds a smooth cone mesh with apex at +Y and base at −Y.
+/// To point the apex forward (−Z) in ship space, use `rot: [-90, 0, 0]`.
+fn create_cone_mesh(radius: f32, height: f32) -> Mesh {
+    const RES: u32 = 16;
+    let half_h    = height * 0.5;
+    let slope_len = (radius * radius + height * height).sqrt();
+    let cos_s     = height / slope_len;  // outward-normal Y component
+    let sin_s     = radius / slope_len;  // outward-normal radial component
+
+    let mut positions: Vec<[f32; 3]> = Vec::new();
+    let mut normals:   Vec<[f32; 3]> = Vec::new();
+    let mut uvs:       Vec<[f32; 2]> = Vec::new();
+    let mut indices:   Vec<u32>      = Vec::new();
+
+    // Side triangles — separate vertices per triangle for sharp normals
+    for i in 0..RES {
+        let a0 = (i as f32 / RES as f32) * std::f32::consts::TAU;
+        let a1 = ((i + 1) as f32 / RES as f32) * std::f32::consts::TAU;
+        let am = (a0 + a1) * 0.5;
+        let base = positions.len() as u32;
+
+        // Apex
+        positions.push([0.0, half_h, 0.0]);
+        normals.push([am.cos() * cos_s, sin_s, am.sin() * cos_s]);
+        uvs.push([0.5, 0.0]);
+
+        // Left base vertex
+        positions.push([a0.cos() * radius, -half_h, a0.sin() * radius]);
+        normals.push([a0.cos() * cos_s, sin_s, a0.sin() * cos_s]);
+        uvs.push([i as f32 / RES as f32, 1.0]);
+
+        // Right base vertex
+        positions.push([a1.cos() * radius, -half_h, a1.sin() * radius]);
+        normals.push([a1.cos() * cos_s, sin_s, a1.sin() * cos_s]);
+        uvs.push([(i + 1) as f32 / RES as f32, 1.0]);
+
+        indices.extend([base, base + 1, base + 2]);
+    }
+
+    // Bottom cap
+    let cap_center = positions.len() as u32;
+    positions.push([0.0, -half_h, 0.0]);
+    normals.push([0.0, -1.0, 0.0]);
+    uvs.push([0.5, 0.5]);
+
+    let cap_ring = positions.len() as u32;
+    for i in 0..RES {
+        let a = (i as f32 / RES as f32) * std::f32::consts::TAU;
+        positions.push([a.cos() * radius, -half_h, a.sin() * radius]);
+        normals.push([0.0, -1.0, 0.0]);
+        uvs.push([0.5 + a.cos() * 0.5, 0.5 + a.sin() * 0.5]);
+    }
+    for i in 0..RES {
+        let next = (i + 1) % RES;
+        indices.extend([cap_center, cap_ring + next, cap_ring + i]);
+    }
+
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL,   normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0,     uvs);
+    mesh.set_indices(Some(Indices::U32(indices)));
+    mesh
 }
 
 // ── Ship bank / roll animation ─────────────────────────────────────────────────

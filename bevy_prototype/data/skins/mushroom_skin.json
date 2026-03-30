@@ -1,0 +1,20 @@
+{
+  "id": "mushroom_skin",
+  "label": "Champignon Cosmique",
+  "description": "Un skin inspiré d'un champignon cosmique: chapeau bombé rouge à pois blancs, pied crème et aura fongique.",
+  "primary_color": [0.80, 0.20, 0.08],
+  "secondary_color": [0.95, 0.92, 0.85],
+  "emissive_color": [0.40, 0.90, 0.40],
+  "preview_svg": "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='#050c10'/><ellipse cx='50' cy='44' rx='34' ry='22' fill='#cc3010'/><rect x='42' y='56' width='16' height='26' rx='4' fill='#e8e0cc'/><circle cx='50' cy='36' r='5' fill='#f2eed8'/><circle cx='34' cy='44' r='4' fill='#f2eed8'/><circle cx='64' cy='41' r='3.5' fill='#f2eed8'/><circle cx='50' cy='82' r='4' fill='#60e060' opacity='0.85'/></svg>",
+  "parts": [
+    { "shape": "cylinder",  "radius": 0.28, "height": 1.80, "pos": [0, -0.90, 0], "color_rgb": [0.90, 0.88, 0.78], "metallic": 0.05, "roughness": 0.85 },
+    { "shape": "cylinder",  "radius": 0.90, "height": 0.15, "pos": [0,  0.08, 0], "color_rgb": [0.85, 0.72, 0.55], "metallic": 0.05, "roughness": 0.90 },
+    { "shape": "sphere",    "radius": 1.00,                  "pos": [0,  0.52, 0], "scale": [1.5, 0.65, 1.5], "color": "hull" },
+    { "shape": "sphere",    "radius": 0.18,                  "pos": [0,  1.08, 0], "scale": [1.0, 0.3, 1.0], "color": "accent" },
+    { "shape": "sphere",    "radius": 0.14,                  "pos": [ 0.52, 0.85,  0.40], "scale": [1.0, 0.3, 1.0], "color": "accent" },
+    { "shape": "sphere",    "radius": 0.14,                  "pos": [-0.52, 0.85,  0.40], "scale": [1.0, 0.3, 1.0], "color": "accent" },
+    { "shape": "sphere",    "radius": 0.12,                  "pos": [ 0.30, 0.85, -0.52], "scale": [1.0, 0.3, 1.0], "color": "accent" },
+    { "shape": "sphere",    "radius": 0.12,                  "pos": [-0.30, 0.85, -0.52], "scale": [1.0, 0.3, 1.0], "color": "accent" },
+    { "shape": "sphere",    "radius": 0.14,                  "pos": [0, -1.82, 0], "color": "glow" }
+  ]
+}

@@ -11,7 +11,7 @@ graph TB
   GS_DE[GameState: Dead]
 
   JSON_MAPS[data/maps/*.json - MapDef: id, label, boundary_radius, SVG preview]
-  JSON_SKINS[data/skins/*.json - SkinDef: id, label, shape, primary/secondary/emissive color, SVG preview]
+  JSON_SKINS[data/skins/*.json - SkinDef: id, label, shape, primary/secondary/emissive color, SVG preview, parts: Vec of SkinPart with shape/pos/rot/scale/color_rgb/emissive_rgb/metallic/roughness]
   JSON_ENEMIES[data/enemies/*.json - EnemyDef: colors, speed, health, spawn rules]
   JSON_LLM[data/llm_config.json - api_url, api_key, model, system_prompt]
   JSON_SECRETS[data/secrets.json - persisted API key]
@@ -50,7 +50,7 @@ graph TB
   IdfTrain[IdfTrain Component - patrol between station waypoints - RER 1800u/s - Metro 1200u/s]
   SceneClean[despawn_scene_entities - SceneEntity marker]
 
-  ShipModel[spawn_player_ship_system - WarPlane / Banana / Mosquito / Custom 3D mesh from shape field]
+  ShipModel[spawn_player_ship_system - build_ship_from_skin_def - parts array spawns per-part materials via build_part_material - spawn_skin_part for sphere/icosphere/box/cylinder/capsule/torus/cone primitives with scale support and color_rgb/emissive_rgb overrides]
   BankAnim[ship_bank_system - roll inclination on yaw input spring-damper]
   CamView[camera_toggle_system - F5 toggle FirstPerson/ThirdPerson - show/hide ship model]
 
