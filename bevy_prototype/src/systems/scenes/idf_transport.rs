@@ -1,17 +1,25 @@
-//! Île-de-France transport network map.
+//! Île-de-France transport network map — Parisian environment.
 //!
-//! The map is a 3-D representation of the Paris metro/RER/Transilien network.
-//! Stations are glowing cubes. Lines are thin box-mesh rails connecting them.
-//! Enemy "trains" are coloured cuboids that patrol their line and shoot lasers.
+//! 3-D model of the Paris metro/RER/Transilien network at 3× real scale.
+//! Stations are glowing spheres (gold = selected, line-coloured = normal).
+//! Enemy trains patrol their lines and shoot homing missiles at the player.
+//! Approach a selected station to see upcoming departures displayed above it.
 //!
-//! Real-time next-departure data is fetched from IDFM PRIM API in background
-//! threads and displayed when the player approaches a selected station.
+//! Visual environment:
+//! - Overcast Parisian grey sky dome with scattered cloud patches.
+//! - Green suburban ground outside Paris, beige city ground inside the périphérique.
+//! - Animated blue Seine river winding through the city centre.
+//! - Tour Eiffel and Arc de Triomphe as recognisable geometric landmarks.
 
 use bevy::prelude::*;
+use rand::Rng;
 use std::sync::{Arc, Mutex};
 
-use crate::components::SceneEntity;
-use crate::resources::{ActiveScene, IdfConfig, IdfNextTrains, SceneKind};
+use crate::components::{MainCamera, Missile, SceneEntity};
+use crate::resources::{
+    ActiveScene, CameraArmOffset, DeathCause, GameState, GameTimer,
+    IdfConfig, IdfNextTrains, IdfTerrainData, SceneKind, TimePaused,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Static network data (positions scaled: 1 unit ≈ 250 m real distance)
@@ -56,11 +64,26 @@ pub struct IdfTrain {
     pub waypoints: Vec<Vec3>,
     pub current_wp: usize,
     pub speed: f32,
+    /// Countdown in seconds until next missile shot.
+    pub shoot_timer: f32,
+    /// Seconds between missile shots (randomised per train).
+    pub shoot_interval: f32,
 }
 
-/// Proximity HUD entity: shows next departures when player is near a station.
+/// Bottom-left HUD entity: shows next departures as plain text.
 #[derive(Component)]
 pub struct IdfProximityHud;
+
+/// Screen-projected popup: positioned above the nearest selected station.
+#[derive(Component)]
+pub struct IdfProximityPopup;
+
+/// Screen-projected label parented to a train: shows line name near the train.
+#[derive(Component)]
+pub struct IdfTrainLabel {
+    /// Entity ID of the IdfTrain this label tracks.
+    pub target: Entity,
+}
 
 // ── Station catalogue ─────────────────────────────────────────────────────────
 //   id, label, prim_id (IDFM Logical Stop Point), lines, [x, y, z]
@@ -311,8 +334,25 @@ pub const IDF_STATIONS: &[(&str, &str, &str, &[&str], [f32; 3])] = &[
 // Scene spawn
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Scale and environment constants
+// ─────────────────────────────────────────────────────────────────────────────
+
 /// Scale factor: 1 unit in IDF_STATIONS pos → this many Bevy world units.
-const STATION_SCALE: f32 = 100.0;
+/// At 300: 1 station-coord unit ≈ 75 m real distance.
+const STATION_SCALE: f32 = 300.0;
+
+/// World-unit radius of inner Paris (périphérique boundary).
+const PARIS_INNER_RADIUS: f32 = 15_000.0;
+
+/// Station proximity radius: departure board appears within this distance.
+const PROXIMITY_RADIUS: f32 = 6_000.0;
+
+/// Trains start shooting when player is within this world-unit range.
+const TRAIN_SHOOT_RANGE: f32 = 40_000.0;
+
+/// Train labels are visible up to this range.
+const TRAIN_LABEL_RANGE: f32 = 12_000.0;
 
 fn station_world_pos(raw: [f32; 3]) -> Vec3 {
     Vec3::new(raw[0] * STATION_SCALE, raw[1] * STATION_SCALE, raw[2] * STATION_SCALE)
@@ -346,89 +386,385 @@ pub fn spawn_idf_transport_scene(
         &idf_config.selected_stations
     };
 
-    // ── Lighting ──────────────────────────────────────────────────────────────
+    let mut rng = rand::thread_rng();
+
+    // ── Parisian overcast lighting ────────────────────────────────────────────
     commands.spawn((
         DirectionalLightBundle {
             directional_light: DirectionalLight {
-                color: Color::rgb(0.90, 0.92, 1.00),
-                illuminance: 12_000.0,
+                color: Color::rgb(0.88, 0.90, 0.95),
+                illuminance: 5_500.0,
                 shadows_enabled: false,
                 ..default()
             },
             transform: Transform::from_rotation(
-                Quat::from_euler(EulerRot::YXZ, 0.3, -0.7, 0.0)
+                Quat::from_euler(EulerRot::YXZ, 0.25, -0.55, 0.0)
             ),
             ..default()
         },
         SceneEntity,
     ));
-    // Ambient fill
+    // Soft ambient fill — grey-blue diffuse typical of Paris overcast
     commands.spawn((
         PointLightBundle {
             point_light: PointLight {
-                color: Color::rgb(0.15, 0.20, 0.35),
-                intensity: 800_000.0,
-                range: 90_000.0,
+                color: Color::rgb(0.50, 0.54, 0.62),
+                intensity: 1_200_000.0,
+                range: 300_000.0,
                 shadows_enabled: false,
                 ..default()
             },
-            transform: Transform::from_xyz(0.0, 5_000.0, 0.0),
+            transform: Transform::from_xyz(0.0, 20_000.0, 0.0),
             ..default()
         },
         SceneEntity,
     ));
 
-    // ── Ground plane (dark city) ──────────────────────────────────────────────
-    let ground_mat = materials.add(StandardMaterial {
-        base_color: Color::rgb(0.02, 0.04, 0.07),
+    // ── Sky dome (Parisian grey overcast) ─────────────────────────────────────
+    let sky_mat = materials.add(StandardMaterial {
+        base_color: Color::rgb(0.68, 0.72, 0.80),
+        emissive:   Color::rgb(0.38, 0.42, 0.50),
+        unlit: true,
+        cull_mode: None,
+        ..default()
+    });
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::UVSphere {
+                radius: 900_000.0,
+                sectors: 24,
+                stacks: 12,
+            })),
+            material: sky_mat,
+            ..default()
+        },
+        SceneEntity,
+    ));
+
+    // ── Cloud patches (flat white boxes at altitude) ──────────────────────────
+    let cloud_mat = materials.add(StandardMaterial {
+        base_color: Color::rgba(0.94, 0.95, 0.97, 0.92),
+        emissive:   Color::rgb(0.22, 0.24, 0.28),
+        unlit: true,
+        cull_mode: None,
+        alpha_mode: AlphaMode::Blend,
+        ..default()
+    });
+    for _ in 0..45 {
+        let cx = rng.gen_range(-80_000.0_f32..80_000.0);
+        let cz = rng.gen_range(-100_000.0_f32..100_000.0);
+        let cy = rng.gen_range(9_000.0_f32..14_000.0);
+        let cw = rng.gen_range(4_000.0_f32..11_000.0);
+        let cd = rng.gen_range(2_500.0_f32..7_000.0);
+        let ch = rng.gen_range(300.0_f32..700.0);
+        commands.spawn((
+            PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Box {
+                    min_x: -cw * 0.5, max_x: cw * 0.5,
+                    min_y: 0.0,       max_y: ch,
+                    min_z: -cd * 0.5, max_z: cd * 0.5,
+                })),
+                material: cloud_mat.clone(),
+                transform: Transform::from_xyz(cx, cy, cz),
+                ..default()
+            },
+            SceneEntity,
+        ));
+    }
+
+    // ── Outer ground (green suburban / Île-de-France countryside) ─────────────
+    let outer_ground_mat = materials.add(StandardMaterial {
+        base_color: Color::rgb(0.27, 0.52, 0.20),
         metallic: 0.0,
         perceptual_roughness: 1.0,
         ..default()
     });
     commands.spawn((
         PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Plane { size: 120_000.0, subdivisions: 0 })),
-            material: ground_mat,
-            transform: Transform::from_xyz(0.0, -100.0, 0.0),
+            mesh: meshes.add(Mesh::from(shape::Plane { size: 1_400_000.0, subdivisions: 0 })),
+            material: outer_ground_mat,
+            transform: Transform::from_xyz(0.0, -105.0, 0.0),
             ..default()
         },
         SceneEntity,
     ));
 
-    // ── Grid lines on the ground for geographic context ───────────────────────
-    let grid_mat = materials.add(StandardMaterial {
-        base_color: Color::rgba(0.08, 0.12, 0.18, 0.5),
-        emissive: Color::rgb(0.03, 0.05, 0.08),
+    // ── Inner Paris ground (Haussmann beige / city stone) ─────────────────────
+    let inner_paris_mat = materials.add(StandardMaterial {
+        base_color: Color::rgb(0.84, 0.79, 0.65),
         metallic: 0.0,
-        perceptual_roughness: 1.0,
+        perceptual_roughness: 0.9,
         ..default()
     });
-    for i in -4..=4 {
-        let pos = i as f32 * 10_000.0;
-        // horizontal grid line
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::Plane {
+                size: PARIS_INNER_RADIUS * 2.3,
+                subdivisions: 0,
+            })),
+            material: inner_paris_mat,
+            transform: Transform::from_xyz(0.0, -100.0, -2_000.0), // shifted slightly N
+            ..default()
+        },
+        SceneEntity,
+    ));
+
+    // ── Seine river ───────────────────────────────────────────────────────────
+    // Three segments approximating the Seine's path through central Paris.
+    // Coordinates at STATION_SCALE = 300: positive z = south.
+    let seine_mat = materials.add(StandardMaterial {
+        base_color: Color::rgb(0.25, 0.50, 0.75),
+        emissive:   Color::rgb(0.04, 0.08, 0.20),
+        metallic: 0.3,
+        perceptual_roughness: 0.35,
+        ..default()
+    });
+    // (x1, z1, x2, z2) endpoint pairs
+    let seine_segments: &[(f32, f32, f32, f32)] = &[
+        (-16_000.0,  1_500.0,  -3_000.0,   600.0),  // rive gauche west
+        ( -3_000.0,    600.0,   3_000.0,   300.0),  // île de la Cité
+        (  3_000.0,    300.0,  18_000.0,  1_800.0), // rive droite east
+    ];
+    let seine_width = 280.0_f32;
+    for &(x1, z1, x2, z2) in seine_segments {
+        let a = Vec3::new(x1, -92.0, z1);
+        let b = Vec3::new(x2, -92.0, z2);
+        let dir = b - a;
+        let len = dir.length();
+        let mid = (a + b) * 0.5;
+        let angle = f32::atan2(dir.x, dir.z);
         commands.spawn((
             PbrBundle {
                 mesh: meshes.add(Mesh::from(shape::Box {
-                    min_x: -60_000.0, max_x: 60_000.0,
-                    min_y: -1.0, max_y: 1.0,
-                    min_z: -3.0, max_z: 3.0,
+                    min_x: -seine_width * 0.5, max_x: seine_width * 0.5,
+                    min_y: 0.0,                max_y: 8.0,
+                    min_z: -len * 0.5,         max_z: len * 0.5,
                 })),
-                material: grid_mat.clone(),
-                transform: Transform::from_xyz(0.0, -95.0, pos),
+                material: seine_mat.clone(),
+                transform: Transform {
+                    translation: mid,
+                    rotation: Quat::from_rotation_y(angle),
+                    ..default()
+                },
                 ..default()
             },
             SceneEntity,
         ));
-        // vertical grid line
+    }
+
+    // ── Tour Eiffel (geometric landmark) ─────────────────────────────────────
+    // Positioned between Bir-Hakeim and Trocadéro (west Paris, near 7e arr.)
+    {
+        let base_x = -7_800.0_f32;
+        let base_z = -2_400.0_f32;
+        let base_y = -95.0_f32;
+        let iron_mat = materials.add(StandardMaterial {
+            base_color: Color::rgb(0.22, 0.20, 0.18),
+            emissive:   Color::rgb(0.04, 0.04, 0.03),
+            metallic: 0.9,
+            perceptual_roughness: 0.5,
+            ..default()
+        });
+        // 4 diagonal legs (tapered boxes converging upward)
+        let leg_offsets = [(-550.0_f32, -550.0_f32), (550.0, -550.0), (-550.0, 550.0), (550.0, 550.0)];
+        for (ox, oz) in leg_offsets {
+            // Leg: thick at base, position so it leans inward at higher y is
+            // simulated by scaling; use two sections per leg
+            commands.spawn((PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Box {
+                    min_x: -80.0, max_x: 80.0,
+                    min_y: 0.0,   max_y: 1_200.0,
+                    min_z: -80.0, max_z: 80.0,
+                })),
+                material: iron_mat.clone(),
+                transform: Transform {
+                    translation: Vec3::new(base_x + ox * 0.6, base_y, base_z + oz * 0.6),
+                    rotation: Quat::from_euler(
+                        EulerRot::YXZ,
+                        f32::atan2(-oz, -ox),
+                        0.35,
+                        0.0,
+                    ),
+                    ..default()
+                },
+                ..default()
+            }, SceneEntity));
+        }
+        // First platform (400 m level)
+        commands.spawn((PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::Box {
+                min_x: -350.0, max_x: 350.0,
+                min_y: 0.0,    max_y: 120.0,
+                min_z: -350.0, max_z: 350.0,
+            })),
+            material: iron_mat.clone(),
+            transform: Transform::from_xyz(base_x, base_y + 1_050.0, base_z),
+            ..default()
+        }, SceneEntity));
+        // Upper shaft
+        commands.spawn((PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::Box {
+                min_x: -120.0, max_x: 120.0,
+                min_y: 0.0,    max_y: 2_000.0,
+                min_z: -120.0, max_z: 120.0,
+            })),
+            material: iron_mat.clone(),
+            transform: Transform::from_xyz(base_x, base_y + 1_170.0, base_z),
+            ..default()
+        }, SceneEntity));
+        // Spire
+        commands.spawn((PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::Cylinder {
+                radius: 25.0,
+                height: 800.0,
+                resolution: 8,
+                segments: 1,
+            })),
+            material: materials.add(StandardMaterial {
+                base_color: Color::rgb(0.80, 0.75, 0.50),
+                emissive: Color::rgb(0.60, 0.50, 0.10),
+                metallic: 0.8,
+                perceptual_roughness: 0.2,
+                ..default()
+            }),
+            transform: Transform::from_xyz(base_x, base_y + 3_170.0, base_z),
+            ..default()
+        }, SceneEntity));
+    }
+
+    // ── Arc de Triomphe (geometric landmark, at Étoile) ───────────────────────
+    {
+        let arc_x = -9_000.0_f32;
+        let arc_z = -8_400.0_f32;
+        let arc_y = -95.0_f32;
+        let stone_mat = materials.add(StandardMaterial {
+            base_color: Color::rgb(0.82, 0.76, 0.60),
+            emissive:   Color::rgb(0.08, 0.07, 0.04),
+            metallic: 0.1,
+            perceptual_roughness: 0.8,
+            ..default()
+        });
+        // Left pillar
+        commands.spawn((PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::Box {
+                min_x: -200.0, max_x:  200.0,
+                min_y: 0.0,    max_y: 1_000.0,
+                min_z: -250.0, max_z:  250.0,
+            })),
+            material: stone_mat.clone(),
+            transform: Transform::from_xyz(arc_x - 350.0, arc_y, arc_z),
+            ..default()
+        }, SceneEntity));
+        // Right pillar
+        commands.spawn((PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::Box {
+                min_x: -200.0, max_x:  200.0,
+                min_y: 0.0,    max_y: 1_000.0,
+                min_z: -250.0, max_z:  250.0,
+            })),
+            material: stone_mat.clone(),
+            transform: Transform::from_xyz(arc_x + 350.0, arc_y, arc_z),
+            ..default()
+        }, SceneEntity));
+        // Arch horizontal beam (top)
+        commands.spawn((PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::Box {
+                min_x: -750.0, max_x:  750.0,
+                min_y: 0.0,    max_y:  280.0,
+                min_z: -250.0, max_z:  250.0,
+            })),
+            material: stone_mat.clone(),
+            transform: Transform::from_xyz(arc_x, arc_y + 820.0, arc_z),
+            ..default()
+        }, SceneEntity));
+    }
+
+    // ── Hills scattered around the Île-de-France ──────────────────────────────
+    // (x, z, base_horizontal_radius, height) – all in world units.
+    // Placed outside the Paris ring road, beyond the beige inner zone.
+    let hill_defs: &[(f32, f32, f32, f32)] = &[
+        (-42_000.0, -52_000.0, 5_500.0, 2_200.0), // Montmorency forest ridge
+        ( 18_000.0, -58_000.0, 4_800.0, 1_800.0), // plains north of Paris
+        ( 52_000.0, -78_000.0, 6_200.0, 2_800.0), // hills toward CDG
+        ( 68_000.0,  18_000.0, 5_000.0, 1_600.0), // Val-de-Marne plateau
+        ( 38_000.0,  72_000.0, 5_500.0, 2_000.0), // Essonne hills
+        (-12_000.0,  78_000.0, 4_600.0, 1_500.0), // Massy/Saclay plateau
+        (-58_000.0,  42_000.0, 7_000.0, 2_600.0), // Versailles ridge
+        (-58_000.0, -12_000.0, 5_800.0, 2_000.0), // Hauts-de-Seine hills
+        (-32_000.0, -62_000.0, 4_500.0, 1_800.0), // Argenteuil butte
+        ( 82_000.0,-118_000.0, 6_000.0, 2_400.0), // butte near Roissy
+    ];
+    let hill_mat = materials.add(StandardMaterial {
+        base_color: Color::rgb(0.26, 0.52, 0.18),
+        metallic: 0.0,
+        perceptual_roughness: 1.0,
+        ..default()
+    });
+    let hill_mesh = meshes.add(Mesh::from(shape::UVSphere { radius: 1.0, sectors: 16, stacks: 8 }));
+
+    // Build the IDF terrain kill-data while spawning hills
+    let mut terrain_data = IdfTerrainData {
+        floor_y: -80.0, // player dies below this Y (ground surface ≈ -95)
+        kill_zones: Vec::new(),
+    };
+    // Monuments
+    terrain_data.kill_zones.push((Vec3::new(-7_800.0, 1_200.0, -2_400.0), 1_000.0, 1_400.0)); // Tour Eiffel
+    terrain_data.kill_zones.push((Vec3::new(-9_000.0,   300.0, -8_400.0),   900.0,   500.0)); // Arc de Triomphe
+
+    for &(hx, hz, hr, height) in hill_defs {
+        let gy = -95.0_f32;
+        commands.spawn((
+            PbrBundle {
+                mesh: hill_mesh.clone(),
+                material: hill_mat.clone(),
+                transform: Transform {
+                    translation: Vec3::new(hx, gy, hz),
+                    scale: Vec3::new(hr, height, hr),
+                    ..default()
+                },
+                ..default()
+            },
+            SceneEntity,
+        ));
+        // Kill zone: centred at 50 % height above ground base
+        terrain_data.kill_zones.push((Vec3::new(hx, gy + height * 0.5, hz), hr * 0.85, height * 0.6));
+    }
+    commands.insert_resource(terrain_data);
+
+    // ── Subtle grid lines on the ground for geographic context ────────────────
+    let grid_mat = materials.add(StandardMaterial {
+        base_color: Color::rgba(0.40, 0.35, 0.25, 0.4),
+        metallic: 0.0,
+        perceptual_roughness: 1.0,
+        alpha_mode: AlphaMode::Blend,
+        ..default()
+    });
+    for i in -6..=6 {
+        let pos = i as f32 * 12_000.0;
+        // east-west grid line
         commands.spawn((
             PbrBundle {
                 mesh: meshes.add(Mesh::from(shape::Box {
-                    min_x: -3.0, max_x: 3.0,
+                    min_x: -80_000.0, max_x: 80_000.0,
                     min_y: -1.0, max_y: 1.0,
-                    min_z: -60_000.0, max_z: 60_000.0,
+                    min_z: -4.0, max_z: 4.0,
                 })),
                 material: grid_mat.clone(),
-                transform: Transform::from_xyz(pos, -95.0, 0.0),
+                transform: Transform::from_xyz(0.0, -94.0, pos),
+                ..default()
+            },
+            SceneEntity,
+        ));
+        // north-south grid line
+        commands.spawn((
+            PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Box {
+                    min_x: -4.0, max_x: 4.0,
+                    min_y: -1.0, max_y: 1.0,
+                    min_z: -80_000.0, max_z: 80_000.0,
+                })),
+                material: grid_mat.clone(),
+                transform: Transform::from_xyz(pos, -94.0, 0.0),
                 ..default()
             },
             SceneEntity,
@@ -437,13 +773,13 @@ pub fn spawn_idf_transport_scene(
 
     // ── Line rails (elevated per line) ────────────────────────────────────────
     let rail_cylinder_mesh = meshes.add(Mesh::from(shape::Cylinder {
-        radius: 12.0,
+        radius: 18.0,
         height: 1.0, // scaled at spawn
         resolution: 6,
         segments: 1,
     }));
 
-    for &(line_id, _label, color, y_off) in IDF_LINES {
+    for &(line_id, _label, color, _y_off) in IDF_LINES {
         let rail_mat = materials.add(StandardMaterial {
             base_color: Color::rgb(color[0] * 0.6, color[1] * 0.6, color[2] * 0.6),
             emissive: Color::rgb(color[0] * 0.4, color[1] * 0.4, color[2] * 0.4),
@@ -499,9 +835,9 @@ pub fn spawn_idf_transport_scene(
             commands.spawn((
                 PbrBundle {
                     mesh: meshes.add(Mesh::from(shape::Box {
-                        min_x: -4.0, max_x: 4.0,
+                        min_x: -8.0, max_x: 8.0,
                         min_y: 0.0, max_y: height,
-                        min_z: -4.0, max_z: 4.0,
+                        min_z: -8.0, max_z: 8.0,
                     })),
                     material: pylon_mat.clone(),
                     transform: Transform::from_xyz(wp.x, ground_y, wp.z),
@@ -520,6 +856,8 @@ pub fn spawn_idf_transport_scene(
     }));
 
     for (idx, &(id, label, _prim_id, lines, raw_pos)) in IDF_STATIONS.iter().enumerate() {
+        // Only show RER B stations
+        if !lines.contains(&"RER_B") { continue; }
         let world_pos = station_world_pos(raw_pos);
         let is_selected = selected.contains(&idx);
 
@@ -527,28 +865,34 @@ pub fn spawn_idf_transport_scene(
         let c = line_color(lines.first().copied().unwrap_or(""));
         let base_color = Color::rgb(c[0], c[1], c[2]);
 
-        let emissive = if is_selected {
-            Color::rgb(c[0] * 3.0, c[1] * 3.0, c[2] * 3.0)
-        } else {
-            Color::rgb(c[0] * 0.6, c[1] * 0.6, c[2] * 0.6)
-        };
-
-        let station_mat = materials.add(StandardMaterial {
-            base_color,
-            emissive,
-            metallic: 0.5,
-            perceptual_roughness: 0.2,
-            ..default()
-        });
+        let emissive = Color::rgb(c[0] * 0.6, c[1] * 0.6, c[2] * 0.6);
 
         // Hub stations (≥3 lines) get a bigger sphere
         let is_hub = lines.len() >= 3;
-        let radius = if is_hub { 80.0 } else if is_selected { 55.0 } else { 35.0 };
+        let radius = if is_hub { 220.0 } else if is_selected { 170.0 } else { 110.0 };
+
+        // Selected stations glow golden-white
+        let (final_base, final_emissive) = if is_selected {
+            (
+                Color::rgb(1.00, 0.88, 0.30),
+                Color::rgb(3.50, 2.80, 0.40),
+            )
+        } else {
+            (base_color, emissive)
+        };
+
+        let station_mat_final = materials.add(StandardMaterial {
+            base_color: final_base,
+            emissive: final_emissive,
+            metallic: if is_selected { 0.2 } else { 0.5 },
+            perceptual_roughness: if is_selected { 0.3 } else { 0.2 },
+            ..default()
+        });
 
         commands.spawn((
             PbrBundle {
                 mesh: station_mesh.clone(),
-                material: station_mat,
+                material: station_mat_final,
                 transform: Transform::from_translation(world_pos)
                     .with_scale(Vec3::splat(radius)),
                 ..default()
@@ -557,55 +901,104 @@ pub fn spawn_idf_transport_scene(
             SceneEntity,
         ));
 
-        let _ = (id, label); // reserved for future billboard labels
+        // Extra glow ring for selected stations
+        if is_selected {
+            let ring_mat = materials.add(StandardMaterial {
+                base_color: Color::rgba(1.0, 0.85, 0.20, 0.6),
+                emissive: Color::rgb(4.0, 3.0, 0.30),
+                alpha_mode: AlphaMode::Add,
+                unlit: true,
+                ..default()
+            });
+            commands.spawn((
+                PbrBundle {
+                    mesh: meshes.add(Mesh::from(shape::UVSphere {
+                        radius: 1.0,
+                        sectors: 12,
+                        stacks: 8,
+                    })),
+                    material: ring_mat,
+                    transform: Transform::from_translation(world_pos)
+                        .with_scale(Vec3::splat(radius * 1.55)),
+                    ..default()
+                },
+                SceneEntity,
+            ));
+        }
+
+        let _ = (id, label);
     }
 
     // ── Enemy trains ──────────────────────────────────────────────────────────
     spawn_enemy_trains(commands, meshes, materials, selected);
 
-    // ── Player spawn: above Paris centre ──────────────────────────────────────
-    let spawn_height = 10_000.0_f32;
-    Transform::from_xyz(0.0, spawn_height, 2_000.0)
-        .looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y)
+    // ── Player spawn: elevated above the RER B line ─────────────────────────
+    // RER B spans z≈-96 000 (CDG) to z≈+78 000 (St-Rémy); x center ≈ 9 000.
+    // Position the camera south-of-center and high to see the full line.
+    Transform::from_xyz(9_000.0, 85_000.0, 45_000.0)
+        .looking_at(Vec3::new(3_000.0, 0.0, -15_000.0), Vec3::Y)
 }
 
 fn spawn_enemy_trains(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
-    selected_stations: &[usize],
+    _selected_stations: &[usize],
 ) {
     for &(line_id, label, color, _y_off) in IDF_LINES {
-        // Collect stations on this line that are selected
-        let waypoints: Vec<Vec3> = IDF_STATIONS.iter().enumerate()
-            .filter(|(idx, s)| s.3.contains(&line_id) && selected_stations.contains(idx))
-            .map(|(_, s)| station_world_pos(s.4))
+        // Always use all stations on this line as waypoints (no selection filter)
+        let waypoints: Vec<Vec3> = IDF_STATIONS.iter()
+            .filter(|s| s.3.contains(&line_id))
+            .map(|s| station_world_pos(s.4))
             .collect();
 
         if waypoints.len() < 2 { continue; }
 
         let train_mat = materials.add(StandardMaterial {
             base_color: Color::rgb(color[0], color[1], color[2]),
-            emissive: Color::rgb(color[0] * 1.5, color[1] * 1.5, color[2] * 1.5),
-            metallic: 0.8,
-            perceptual_roughness: 0.2,
+            emissive: Color::rgb(color[0] * 1.8, color[1] * 1.8, color[2] * 1.8),
+            metallic: 0.85,
+            perceptual_roughness: 0.15,
             ..default()
         });
 
-        let speed = if line_id.starts_with("RER") { 1_800.0 } else { 1_200.0 };
+        // Bright emissive "destination sign" on the front/top of each train
+        let sign_mat = materials.add(StandardMaterial {
+            base_color: Color::rgb(color[0] * 0.4, color[1] * 0.4, color[2] * 0.4),
+            emissive: Color::rgb(color[0] * 5.5, color[1] * 5.5, color[2] * 5.5),
+            unlit: true,
+            ..default()
+        });
 
-        // Spawn 2 trains per active line, at different waypoint offsets
-        for offset in 0..2usize {
+        // Undercarriage shadow panel (dark, metallic)
+        let chassis_mat = materials.add(StandardMaterial {
+            base_color: Color::rgb(0.08, 0.08, 0.10),
+            metallic: 0.95,
+            perceptual_roughness: 0.4,
+            ..default()
+        });
+
+        // RER trains are longer / faster than Métro trains
+        let is_rer = line_id.starts_with("RER");
+        let speed = if is_rer { 2_800.0 } else { 1_800.0 };
+        let train_len  = if is_rer { 600.0 } else { 360.0 };
+        let train_half_w = if is_rer { 75.0 } else { 60.0 };
+        let train_half_h = if is_rer { 55.0 } else { 45.0 };
+        let shoot_interval: f32 = if is_rer { 3.5 } else { 5.0 };
+
+        let mut rng = rand::thread_rng();
+
+        // Spawn 5 trains per line, evenly spread along the route
+        for offset in 0..5usize {
             let start_wp = (offset * waypoints.len() / 2).min(waypoints.len() - 1);
             let start_pos = waypoints[start_wp];
 
-            // The train is a flat cuboid with the line label baked into its colour
-            let train_len = if line_id.starts_with("RER") { 200.0 } else { 120.0 };
+            // Main carriage body
             commands.spawn((
                 PbrBundle {
                     mesh: meshes.add(Mesh::from(shape::Box {
-                        min_x: -25.0, max_x: 25.0,
-                        min_y: -18.0, max_y: 18.0,
+                        min_x: -train_half_w,    max_x: train_half_w,
+                        min_y: -train_half_h,    max_y: train_half_h,
                         min_z: -train_len / 2.0, max_z: train_len / 2.0,
                     })),
                     material: train_mat.clone(),
@@ -617,21 +1010,58 @@ fn spawn_enemy_trains(
                     waypoints: waypoints.clone(),
                     current_wp: (start_wp + 1) % waypoints.len(),
                     speed,
+                    shoot_timer: rng.gen_range(0.0..shoot_interval),
+                    shoot_interval,
                 },
-                // Reuse existing Alien ship health detection structures via SceneEntity tag
                 SceneEntity,
-            ));
-
-            // Emissive line-label "sign" mounted on top of the train  
-            let sign_mat = materials.add(StandardMaterial {
-                base_color: Color::rgb(color[0] * 0.8, color[1] * 0.8, color[2] * 0.8),
-                emissive: Color::rgb(color[0] * 3.0, color[1] * 3.0, color[2] * 3.0),
-                metallic: 0.0,
-                perceptual_roughness: 0.5,
-                ..default()
+            ))
+            .with_children(|parent| {
+                // Emissive line-sign panel on top of the train (very bright)
+                parent.spawn(PbrBundle {
+                    mesh: meshes.add(Mesh::from(shape::Box {
+                        min_x: -(train_half_w - 5.0), max_x: train_half_w - 5.0,
+                        min_y: 0.0,                   max_y: 18.0,
+                        min_z: -(train_len * 0.55),   max_z: train_len * 0.55,
+                    })),
+                    material: sign_mat.clone(),
+                    transform: Transform::from_xyz(0.0, train_half_h, 0.0),
+                    ..default()
+                });
+                // Dark chassis underside
+                parent.spawn(PbrBundle {
+                    mesh: meshes.add(Mesh::from(shape::Box {
+                        min_x: -(train_half_w + 5.0), max_x: train_half_w + 5.0,
+                        min_y: -8.0, max_y: 0.0,
+                        min_z: -(train_len * 0.48), max_z: train_len * 0.48,
+                    })),
+                    material: chassis_mat.clone(),
+                    transform: Transform::from_xyz(0.0, -train_half_h, 0.0),
+                    ..default()
+                });
+                // Front headlamp disc
+                parent.spawn(PbrBundle {
+                    mesh: meshes.add(Mesh::from(shape::Cylinder {
+                        radius: 20.0,
+                        height: 15.0,
+                        resolution: 10,
+                        segments: 1,
+                    })),
+                    material: materials.add(StandardMaterial {
+                        base_color: Color::rgb(1.0, 0.95, 0.80),
+                        emissive: Color::rgb(8.0, 7.5, 5.0),
+                        unlit: true,
+                        ..default()
+                    }),
+                    transform: Transform {
+                        translation: Vec3::new(0.0, 0.0, train_len / 2.0 + 5.0),
+                        rotation: Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+                        ..default()
+                    },
+                    ..default()
+                });
             });
-            let _ = (sign_mat, label); // Will be used once text-on-mesh is added
         }
+        let _ = label;
     }
 }
 
@@ -643,7 +1073,7 @@ fn spawn_enemy_trains(
 pub fn idf_train_movement_system(
     mut train_q: Query<(&mut Transform, &mut IdfTrain)>,
     time: Res<Time>,
-    paused: Res<crate::resources::TimePaused>,
+    paused: Res<TimePaused>,
     chat: Res<crate::systems::ui::copilot_chat::LlmChatState>,
 ) {
     if paused.0 || chat.open { return; }
@@ -660,16 +1090,205 @@ pub fn idf_train_movement_system(
             train.current_wp = (train.current_wp + 1) % train.waypoints.len();
         } else {
             transform.translation += dir.normalize() * train.speed * dt;
-            // Orient along travel direction
-            transform.look_at(target, Vec3::Y);
+            // Orient along travel direction (look_at needs a non-degenerate up)
+            if (target - transform.translation).length() > 1.0 {
+                transform.look_at(target, Vec3::Y);
+            }
         }
     }
 }
 
-// Laser shooting for IDF trains is handled via the shared
-// combat system (shoot_laser_system). IDF trains are spawned
-// with no AlienShip component for now, so player must simply
-// dodge them. Future: add AlienShip to IdfTrain entities.
+/// IDF trains periodically shoot homing missiles at the player.
+pub fn idf_train_shoot_system(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut train_q: Query<(&Transform, &mut IdfTrain)>,
+    camera_q: Query<&Transform, With<MainCamera>>,
+    time: Res<Time>,
+    paused: Res<TimePaused>,
+    chat: Res<crate::systems::ui::copilot_chat::LlmChatState>,
+    game_timer: Res<GameTimer>,
+) {
+    // Trains start shooting after 8 seconds
+    if paused.0 || chat.open || game_timer.0 < 8.0 { return; }
+    let dt = time.delta_seconds();
+    let Ok(cam) = camera_q.get_single() else { return };
+    let player_pos = cam.translation;
+
+    for (train_tf, mut train) in &mut train_q {
+        train.shoot_timer -= dt;
+        if train.shoot_timer > 0.0 { continue; }
+
+        // Reset timer
+        train.shoot_timer = train.shoot_interval;
+
+        let dist = (train_tf.translation - player_pos).length();
+        if dist > TRAIN_SHOOT_RANGE || dist < 800.0 { continue; }
+
+        // Spawn a line-coloured homing missile from the train's front
+        let c = line_color(train.line_id);
+        let toward_player = (player_pos - train_tf.translation).normalize_or_zero();
+        let missile_rot = Quat::from_rotation_arc(Vec3::Y, toward_player);
+        let spawn_pos = train_tf.translation + toward_player * 200.0;
+
+        commands.spawn((
+            PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Cylinder {
+                    radius: 20.0,
+                    height: 160.0,
+                    resolution: 10,
+                    segments: 1,
+                })),
+                material: materials.add(StandardMaterial {
+                    base_color: Color::rgb(c[0], c[1], c[2]),
+                    emissive: Color::rgb(c[0] * 4.0, c[1] * 4.0, c[2] * 4.0),
+                    perceptual_roughness: 0.4,
+                    metallic: 0.7,
+                    ..default()
+                }),
+                transform: Transform::from_translation(spawn_pos).with_rotation(missile_rot),
+                ..default()
+            },
+            Missile { speed: 18_000.0, turn_rate: 1.6, lifetime: 18.0 },
+        ));
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Screen-space label systems
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Spawns a UI text label for each new IdfTrain entity.
+/// Runs in Update so it reacts to actors spawned in any frame.
+pub fn idf_on_train_added_system(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    added_trains: Query<(Entity, &IdfTrain), Added<IdfTrain>>,
+) {
+    let font = asset_server.load(crate::setup::resolve_ui_font_path());
+    for (entity, train) in &added_trains {
+        // Display the line id as short uppercase text (M1, RER A, etc.)
+        let display = train.line_id.replace("RER_", "RER ").replace("_", " ");
+        let c = line_color(train.line_id);
+        commands.spawn((
+            TextBundle {
+                style: Style {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top:  Val::Px(0.0),
+                    ..default()
+                },
+                text: Text::from_section(
+                    display,
+                    TextStyle {
+                        font: font.clone(),
+                        font_size: 16.0,
+                        color: Color::rgb(c[0], c[1], c[2]),
+                    },
+                ),
+                visibility: Visibility::Hidden,
+                background_color: BackgroundColor(Color::rgba(0.0, 0.0, 0.0, 0.55)),
+                ..default()
+            },
+            IdfTrainLabel { target: entity },
+            SceneEntity,
+        ));
+    }
+}
+
+/// Each frame projects each train to screen space and updates its label position.
+pub fn idf_update_train_labels_system(
+    mut label_q: Query<(&mut Style, &mut Visibility, &IdfTrainLabel)>,
+    train_q: Query<&Transform, With<IdfTrain>>,
+    camera_q: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+    arm: Res<CameraArmOffset>,
+) {
+    let Ok((camera, cam_gt)) = camera_q.get_single() else { return };
+    let player_pos = cam_gt.translation() - arm.0;
+
+    for (mut style, mut vis, label) in &mut label_q {
+        let Ok(train_tf) = train_q.get(label.target) else {
+            *vis = Visibility::Hidden;
+            continue;
+        };
+        let train_pos = train_tf.translation;
+        let dist = (train_pos - player_pos).length();
+
+        if dist > TRAIN_LABEL_RANGE {
+            *vis = Visibility::Hidden;
+            continue;
+        }
+
+        // Project a point above the train to screen space
+        let above = train_pos + Vec3::Y * 180.0;
+        if let Some(screen) = camera.world_to_viewport(cam_gt, above) {
+            *vis = Visibility::Visible;
+            style.left = Val::Px(screen.x - 18.0);
+            style.top  = Val::Px(screen.y - 10.0);
+        } else {
+            *vis = Visibility::Hidden;
+        }
+    }
+}
+
+/// Updates the proximity departure popup above the nearest selected station.
+pub fn idf_update_proximity_popup_system(
+    mut popup_q: Query<(&mut Style, &mut Text, &mut Visibility), With<IdfProximityPopup>>,
+    camera_q: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+    station_q: Query<(&Transform, &IdfStation)>,
+    next_trains: Res<IdfNextTrains>,
+    idf_config: Res<IdfConfig>,
+    arm: Res<CameraArmOffset>,
+) {
+    let Ok((camera, cam_gt)) = camera_q.get_single() else { return };
+    let player_pos = cam_gt.translation() - arm.0;
+
+    let nearest = station_q.iter()
+        .filter(|(_, s)| idf_config.selected_stations.contains(&s.station_idx))
+        .min_by(|(a, _), (b, _)| {
+            let da = (a.translation - player_pos).length();
+            let db = (b.translation - player_pos).length();
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+    let Ok((mut style, mut text, mut vis)) = popup_q.get_single_mut() else { return };
+
+    if let Some((st_tf, st_data)) = nearest {
+        let dist = (st_tf.translation - player_pos).length();
+        if dist > PROXIMITY_RADIUS {
+            *vis = Visibility::Hidden;
+            return;
+        }
+
+        let station = IDF_STATIONS.get(st_data.station_idx);
+        let station_name = station.map(|s| s.1).unwrap_or("?");
+        let prim_id = station.map(|s| s.2).unwrap_or("");
+        let deps = next_trains.departures.get(prim_id)
+            .cloned()
+            .unwrap_or_else(|| make_demo_data(
+                IDF_STATIONS.get(st_data.station_idx).map(|s| s.0).unwrap_or("")
+            ));
+
+        // Show above the station sphere
+        let above = st_tf.translation + Vec3::Y * 700.0;
+        if let Some(screen) = camera.world_to_viewport(cam_gt, above) {
+            *vis = Visibility::Visible;
+            style.left = Val::Px((screen.x - 160.0).max(4.0));
+            style.top  = Val::Px((screen.y - 10.0).max(4.0));
+
+            let mut content = format!("📍 {station_name}\n");
+            for d in deps.iter().take(8) {
+                content.push_str(&format!("  {d}\n"));
+            }
+            text.sections[0].value = content;
+        } else {
+            *vis = Visibility::Hidden;
+        }
+    } else {
+        *vis = Visibility::Hidden;
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Real-time next-train data
@@ -800,6 +1419,44 @@ fn parse_wait(iso: &str) -> String {
     iso.to_owned()
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Terrain / monument collision death
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Kills the player on ground impact or collision with a hill / monument.
+/// Only active while the IDF map is loaded (resource present).
+pub fn idf_terrain_death_system(
+    terrain: Option<Res<IdfTerrainData>>,
+    camera_q: Query<&Transform, With<MainCamera>>,
+    paused: Res<TimePaused>,
+    mut death_cause: ResMut<DeathCause>,
+    mut next_state: ResMut<NextState<GameState>>,
+    game_timer: Res<GameTimer>,
+) {
+    if paused.0 { return; }
+    let Some(terrain) = terrain else { return };
+    let Ok(cam) = camera_q.get_single() else { return };
+    let pos = cam.translation;
+
+    if pos.y < terrain.floor_y {
+        info!("Player hit the IDF ground! Score: {:.1}s", game_timer.0);
+        *death_cause = DeathCause::Terrain;
+        next_state.set(GameState::Dead);
+        return;
+    }
+
+    for &(center, hr, vr) in &terrain.kill_zones {
+        let d = pos - center;
+        let norm = (d.x * d.x + d.z * d.z) / (hr * hr) + (d.y * d.y) / (vr * vr);
+        if norm < 1.0 {
+            info!("Player flew into IDF terrain obstacle! Score: {:.1}s", game_timer.0);
+            *death_cause = DeathCause::Terrain;
+            next_state.set(GameState::Dead);
+            return;
+        }
+    }
+}
+
 fn make_demo_data(station_id: &str) -> Vec<String> {
     // Semi-random fake times based on station id hash to look varied
     let h = station_id.len() % 7;
@@ -820,30 +1477,27 @@ fn make_demo_data(station_id: &str) -> Vec<String> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Proximity HUD system
+// Proximity HUD (bottom-left fallback) and UI spawn functions
 // ─────────────────────────────────────────────────────────────────────────────
 
-const PROXIMITY_RADIUS: f32 = 2_500.0;
-
-/// Shows next departures for the nearest selected station when the player is
-/// within PROXIMITY_RADIUS units.
+/// Bottom-left text HUD: shows departures for nearest selected station.
 pub fn idf_proximity_hud_system(
     mut hud_q: Query<&mut Text, With<IdfProximityHud>>,
-    camera_q: Query<&Transform, With<crate::components::MainCamera>>,
+    camera_q: Query<&Transform, With<MainCamera>>,
     station_q: Query<(&Transform, &IdfStation)>,
     next_trains: Res<IdfNextTrains>,
     idf_config: Res<IdfConfig>,
-    arm: Res<crate::resources::CameraArmOffset>,
+    arm: Res<CameraArmOffset>,
 ) {
     let Ok(cam_t) = camera_q.get_single() else { return };
-    // Logical player pos = camera - arm offset
     let player_pos = cam_t.translation - arm.0;
 
     let nearest = station_q.iter()
         .filter(|(_, s)| idf_config.selected_stations.contains(&s.station_idx))
-        .min_by_key(|(t, _)| {
-            let d = (t.translation - player_pos).length();
-            d as i64
+        .min_by(|(a, _), (b, _)| {
+            let da = (a.translation - player_pos).length();
+            let db = (b.translation - player_pos).length();
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
         });
 
     let Ok(mut hud_text) = hud_q.get_single_mut() else { return };
@@ -856,10 +1510,11 @@ pub fn idf_proximity_hud_system(
             let prim_id = station.map(|s| s.2).unwrap_or("");
             let deps = next_trains.departures.get(prim_id)
                 .cloned()
-                .unwrap_or_else(|| vec!["No data yet".to_owned()]);
-
-            let dist_m = (dist / 100.0 * 250.0) as u32; // convert back to approximate meters
-            let mut text = format!("📍 {station_name}  ({dist_m} m)\n");
+                .unwrap_or_else(|| make_demo_data(
+                    IDF_STATIONS.get(sdata.station_idx).map(|s| s.0).unwrap_or("")
+                ));
+            let dist_m = (dist * 0.33) as u32;
+            let mut text = format!("\u{2b6f} {station_name}  ({dist_m} m)\n");
             for d in deps.iter().take(6) {
                 text.push_str(&format!("  {d}\n"));
             }
@@ -885,19 +1540,51 @@ pub fn spawn_idf_hud(
         TextBundle {
             style: Style {
                 position_type: PositionType::Absolute,
-                left: Val::Px(20.0),
-                bottom: Val::Px(80.0),
-                max_width: Val::Px(480.0),
+                right: Val::Px(20.0),
+                top: Val::Px(80.0),
+                max_width: Val::Px(300.0),
                 ..default()
             },
             text: Text::from_section("", TextStyle {
                 font,
                 font_size: 15.0,
-                color: Color::rgb(0.20, 0.90, 0.80),
+                color: Color::rgb(0.25, 0.95, 0.85),
             }),
+            background_color: BackgroundColor(Color::rgba(0.0, 0.0, 0.0, 0.6)),
             ..default()
         },
         IdfProximityHud,
+        SceneEntity,
+    ));
+}
+
+/// Spawns the floating departure popup (screen-projected above stations).
+pub fn spawn_idf_proximity_popup(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    active_scene: Res<ActiveScene>,
+) {
+    if active_scene.0 != SceneKind::IdfTransport { return; }
+    let font = asset_server.load(crate::setup::resolve_ui_font_path());
+    commands.spawn((
+        TextBundle {
+            style: Style {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top:  Val::Px(0.0),
+                max_width: Val::Px(340.0),
+                ..default()
+            },
+            text: Text::from_section("", TextStyle {
+                font,
+                font_size: 14.0,
+                color: Color::rgb(1.0, 0.95, 0.80),
+            }),
+            visibility: Visibility::Hidden,
+            background_color: BackgroundColor(Color::rgba(0.0, 0.05, 0.12, 0.80)),
+            ..default()
+        },
+        IdfProximityPopup,
         SceneEntity,
     ));
 }

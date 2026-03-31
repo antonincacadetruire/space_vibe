@@ -40,8 +40,12 @@ use systems::enemies::alien_ships::{alien_ship_spawner_system, alien_ship_moveme
 use systems::enemies::combat::{shoot_laser_system, laser_movement_system, portal_animation_system, explosion_animation_system, health_pip_update_system, despawn_effects};
 use systems::core::player_ship::{spawn_player_ship_system, ship_bank_system, ShipRollState};
 use systems::scenes::idf_transport::{
-    spawn_idf_hud, idf_train_movement_system,
+    spawn_idf_hud, spawn_idf_proximity_popup,
+    idf_train_movement_system, idf_train_shoot_system,
     idf_fetch_next_trains_system, idf_proximity_hud_system,
+    idf_on_train_added_system,
+    idf_update_train_labels_system, idf_update_proximity_popup_system,
+    idf_terrain_death_system,
     IdfPrimPollTimer,
 };
 use systems::data_loader::load_catalogs;
@@ -96,6 +100,7 @@ fn main() {
             spawn_minimap_ui,
             setup_llm_chat_ui,
             spawn_idf_hud.after(spawn_active_scene_system),
+            spawn_idf_proximity_popup.after(spawn_active_scene_system),
         ))
         .add_systems(OnExit(GameState::Playing), (despawn_timer_ui, despawn_minimap_ui, teardown_llm_chat_ui, despawn_missiles, despawn_alien_ships, despawn_effects, despawn_scene_entities))
         .add_systems(OnEnter(GameState::Dead), setup_death_screen)
@@ -165,6 +170,7 @@ fn main() {
                 missile_movement_system.after(missile_spawner_system).after(llm_chat_toggle_system),
                 danger_hud_system.after(missile_movement_system),
                 desert_terrain_death_system.after(player_movement_system).after(llm_chat_toggle_system),
+                idf_terrain_death_system.after(player_movement_system).after(llm_chat_toggle_system),
                 alien_ship_spawner_system.after(llm_chat_toggle_system),
                 alien_ship_movement_system.after(alien_ship_spawner_system).after(llm_chat_toggle_system),
                 alien_ship_shoot_system.after(alien_ship_movement_system).after(llm_chat_toggle_system),
@@ -174,7 +180,9 @@ fn main() {
                 health_pip_update_system,
                 update_minimap_system,
                 idf_train_movement_system,
+                idf_train_shoot_system.after(idf_train_movement_system),
                 idf_proximity_hud_system,
+                idf_update_train_labels_system,
                 idf_fetch_next_trains_system,
             )
                 .run_if(in_state(GameState::Playing)),
@@ -189,6 +197,15 @@ fn main() {
             )
                 .run_if(in_state(GameState::Playing))
                 .run_if(resource_exists::<systems::scenes::space_scene::RingMeshLibrary>()),
+        )
+        // ── Update: IDF-specific dynamic systems ─────────────────────────────
+        .add_systems(
+            Update,
+            (
+                idf_on_train_added_system,
+                idf_update_proximity_popup_system,
+            )
+                .run_if(in_state(GameState::Playing)),
         )
         // ── Update: Dead state ────────────────────────────────────────────────
         .add_systems(

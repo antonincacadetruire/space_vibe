@@ -500,3 +500,15 @@ pub struct DesertTerrainData {
     /// List of (centre, horizontal_radius, vertical_radius) ellipsoid kill zones.
     pub kill_zones: Vec<(Vec3, f32, f32)>,
 }
+
+// ── IDF terrain kill data ─────────────────────────────────────────────────────
+/// Populated by `spawn_idf_transport_scene`; queried by `idf_terrain_death_system`.
+/// Only valid while the IDF map is active.
+#[derive(Resource, Default)]
+pub struct IdfTerrainData {
+    /// Y below which the player dies (ground level).
+    pub floor_y: f32,
+    /// List of (centre, horizontal_radius, vertical_radius) ellipsoid kill zones
+    /// for monuments and hills.
+    pub kill_zones: Vec<(Vec3, f32, f32)>,
+}

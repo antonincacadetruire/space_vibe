@@ -1,0 +1,24 @@
+{
+  "id": "skin_burger_ship",
+  "label": "Burger Ship",
+  "description": "Un vaisseau en forme de burger juteux avec pain, viande, fromage et laitue.",
+  "primary_color": [0.85, 0.65, 0.35],
+  "secondary_color": [0.4, 0.25, 0.1],
+  "emissive_color": [0.0, 0.8, 0.0],
+  "preview_svg": "<svg width='120' height='80' xmlns='http://www.w3.org/2000/svg'><rect width='120' height='80' fill='#050c10'/><ellipse cx='60' cy='40' rx='40' ry='20' fill='rgb(217,166,90)' stroke='rgb(102,64,26)' stroke-width='2'/><ellipse cx='60' cy='32' rx='38' ry='16' fill='rgb(255,255,102)'/><ellipse cx='60' cy='48' rx='38' ry='16' fill='rgb(102,64,26)'/><ellipse cx='60' cy='56' rx='38' ry='16' fill='rgb(0,204,0)'/></svg>",
+  "parts": [
+    {"shape":"half_sphere","pos":[0,0.8,0],"rot":[0,0,0],"scale":[2.0,0.6,2.0],"color_rgb":[0.85,0.65,0.35],"emissive_rgb":[0,0,0],"metallic":0.2,"roughness":0.8,"radius":1.5},
+    {"shape":"disc","pos":[0,0.3,0],"rot":[0,0,0],"scale":[2.0,0.15,2.0],"color_rgb":[1.0,1.0,0.4],"emissive_rgb":[0,0,0],"metallic":0.4,"roughness":0.5,"radius":1.4,"height":0.2},
+    {"shape":"disc","pos":[0,0.0,0],"rot":[0,0,0],"scale":[2.0,0.2,2.0],"color_rgb":[0.4,0.25,0.1],"emissive_rgb":[0,0,0],"metallic":0.2,"roughness":0.9,"radius":1.4,"height":0.25},
+    {"shape":"disc","pos":[0,-0.3,0],"rot":[0,0,0],"scale":[2.0,0.15,2.0],"color_rgb":[0.0,0.8,0.0],"emissive_rgb":[0,0.2,0],"metallic":0.0,"roughness":0.8,"radius":1.4,"height":0.2},
+    {"shape":"half_sphere","pos":[0,-0.8,0],"rot":[180,0,0],"scale":[2.0,0.6,2.0],"color_rgb":[0.85,0.65,0.35],"emissive_rgb":[0,0,0],"metallic":0.2,"roughness":0.8,"radius":1.5},
+    {"shape":"sphere","pos":[-1.8,0,0],"rot":[0,0,0],"scale":[0.4,0.4,0.4],"color_rgb":[1.0,1.0,0.4],"emissive_rgb":[0,0,0],"metallic":0.4,"roughness":0.5,"radius":0.2},
+    {"shape":"sphere","pos":[1.8,0,0],"rot":[0,0,0],"scale":[0.4,0.4,0.4],"color_rgb":[1.0,1.0,0.4],"emissive_rgb":[0,0,0],"metallic":0.4,"roughness":0.5,"radius":0.2},
+    {"shape":"cylinder","pos":[0,1.0,-1.2],"rot":[0,0,0],"scale":[0.3,0.3,0.3],"color_rgb":[1.0,1.0,0.4],"emissive_rgb":[0,0,0],"metallic":0.4,"roughness":0.5,"radius":0.15,"height":0.5},
+    {"shape":"cylinder","pos":[0,-1.0,1.2],"rot":[0,0,0],"scale":[0.3,0.3,0.3],"color_rgb":[1.0,1.0,0.4],"emissive_rgb":[0,0,0],"metallic":0.4,"roughness":0.5,"radius":0.15,"height":0.5},
+    {"shape":"capsule","pos":[-1.5,0.5,-0.8],"rot":[0,45,0],"scale":[0.2,0.2,0.5],"color_rgb":[0.0,0.8,0.0],"emissive_rgb":[0,0.2,0],"metallic":0.0,"roughness":0.8,"radius":0.1,"height":0.5},
+    {"shape":"capsule","pos":[1.5,0.5,-0.8],"rot":[0,-45,0],"scale":[0.2,0.2,0.5],"color_rgb":[0.0,0.8,0.0],"emissive_rgb":[0,0.2,0],"metallic":0.0,"roughness":0.8,"radius":0.1,"height":0.5},
+    {"shape":"capsule","pos":[-1.5,-0.5,0.8],"rot":[0,45,0],"scale":[0.2,0.2,0.5],"color_rgb":[0.0,0.8,0.0],"emissive_rgb":[0,0.2,0],"metallic":0.0,"roughness":0.8,"radius":0.1,"height":0.5},
+    {"shape":"capsule","pos":[1.5,-0.5,0.8],"rot":[0,-45,0],"scale":[0.2,0.2,0.5],"color_rgb":[0.0,0.8,0.0],"emissive_rgb":[0,0.2,0],"metallic":0.0,"roughness":0.8,"radius":0.1,"height":0.5}
+  ]
+}
