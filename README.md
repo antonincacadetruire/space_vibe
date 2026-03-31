@@ -30,7 +30,7 @@ graph TB
   KillCount[KillCount Resource - reset on enter Playing]
   SL[SceneLeaderboard - top-3 per scene persisted to .dat files]
   ZB[ZoneBoundary Resource - boundary_radius from MapCatalog]
-  ShipSkin[ShipSkin Resource - WarPlane / Banana / Mosquito / Custom(id)]
+  ShipSkin["ShipSkin Resource - WarPlane / Banana / Mosquito / Custom(id)"]
   ShipRoll[ShipRollState Resource - current roll angle for bank animation]
   CamMode[CameraMode Resource - FirstPerson / ThirdPerson toggle F5]
   CamArm[CameraArmOffset - spring-arm 16u back + 9u up in ThirdPerson]
